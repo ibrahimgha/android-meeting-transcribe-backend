@@ -1,0 +1,32 @@
+{% extends "meetings/base.html" %}
+
+{% block title %}Log in - Meeting Transcribe{% endblock %}
+
+{% block content %}
+<section class="login-panel">
+    <h1>Meeting Transcribe</h1>
+    <p class="subtitle">Log in to view your meetings and extract minutes.</p>
+
+    <form method="post">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="form-error">{{ form.non_field_errors }}</div>
+        {% endif %}
+        <div>
+            <label for="{{ form.username.id_for_label }}">Username</label>
+            {{ form.username }}
+            {% if form.username.errors %}
+                <div class="form-error">{{ form.username.errors }}</div>
+            {% endif %}
+        </div>
+        <div>
+            <label for="{{ form.password.id_for_label }}">Password</label>
+            {{ form.password }}
+            {% if form.password.errors %}
+                <div class="form-error">{{ form.password.errors }}</div>
+            {% endif %}
+        </div>
+        <button type="submit">Log in</button>
+    </form>
+</section>
+{% endblock %}

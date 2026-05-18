@@ -9,6 +9,7 @@ Django REST Framework backend for authenticated meeting recording sessions.
 - Ends the meeting when the mobile app stops recording.
 - Receives sequential audio chunks with client-provided speaker metadata.
 - Queues chunks in the database and transcribes them sequentially with OpenAI.
+- Provides an authenticated web page where a user can view meetings and extract meeting minutes.
 
 ## Setup
 
@@ -61,6 +62,19 @@ For a one-shot local run:
 ```
 
 The default transcription model is `gpt-4o-mini-transcribe`. Override with `OPENAI_TRANSCRIBE_MODEL`.
+
+## Web Meeting Minutes
+
+Open `/meetings/` in a browser and log in with the same Django user used by the mobile app.
+For each meeting, choose one of:
+
+- Requirement gathering
+- Followup meeting
+- Draft delivery
+
+Then click **Extract meeting minutes**. The backend sends the meeting transcript to OpenAI and stores
+the generated Markdown minutes on the meeting. The default minutes model is `gpt-4o-mini`; override
+with `OPENAI_MINUTES_MODEL`.
 
 ## Tests
 

@@ -1,13 +1,16 @@
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.test import Client
 from django.test import TestCase, override_settings
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
-from .models import AudioSegment, Meeting, MeetingStatus, SegmentStatus
+from .minutes import MinutesResult, generate_minutes_for_meeting
+from .models import AudioSegment, Meeting, MeetingStatus, MeetingType, SegmentStatus
 from .transcription import TranscriptionResult, process_next_pending_segment
 
 User = get_user_model()
@@ -155,6 +158,83 @@ class TranscriptionQueueTests(TestCase):
         self.assertIsNone(process_next_pending_segment())
 
 
+class MeetingMinutesTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="web-user",
+            password="strong-password-123",
+        )
+        self.other_user = User.objects.create_user(username="other-web-user")
+        self.client = Client()
+
+    def make_meeting(self, user=None, title="Discovery call") -> Meeting:
+        meeting = Meeting.objects.create(
+            user=user or self.user,
+            title=title,
+            status=MeetingStatus.COMPLETE,
+            meeting_type=MeetingType.REQUIREMENT_GATHERING,
+        )
+        AudioSegment.objects.create(
+            meeting=meeting,
+            user=user or self.user,
+            sequence_number=1,
+            speaker_label="person_1",
+            client_start_ms=0,
+            client_end_ms=5000,
+            transcription_status=SegmentStatus.COMPLETE,
+            transcription_text="We need a customer portal with approvals.",
+            audio_file=ContentFile(wav_bytes(), name="seg_1.wav"),
+            audio_size_bytes=len(wav_bytes()),
+            audio_content_type="audio/wav",
+        )
+        return meeting
+
+    def test_web_meetings_requires_login(self):
+        response = self.client.get("/meetings/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response["Location"])
+
+    def test_web_meetings_show_only_current_users_meetings(self):
+        own_meeting = self.make_meeting(title="Own meeting")
+        self.make_meeting(user=self.other_user, title="Other meeting")
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.get("/meetings/")
+
+        self.assertContains(response, own_meeting.title)
+        self.assertNotContains(response, "Other meeting")
+
+    def test_generate_minutes_saves_type_and_calls_extractor(self):
+        meeting = self.make_meeting()
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        with patch("meetings.web_views.generate_minutes_for_meeting") as extractor:
+            response = self.client.post(
+                f"/meetings/{meeting.id}/minutes/",
+                {"meeting_type": MeetingType.FOLLOWUP_MEETING},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.meeting_type, MeetingType.FOLLOWUP_MEETING)
+        extractor.assert_called_once()
+
+    def test_generate_minutes_for_meeting_stores_openai_output(self):
+        meeting = self.make_meeting()
+        fake_client = FakeMinutesClient()
+
+        generate_minutes_for_meeting(meeting, client=fake_client)
+
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.minutes_text, "## Summary\n- Clear next step.")
+        self.assertEqual(meeting.minutes_model, "fake-minutes")
+        self.assertEqual(meeting.minutes_response["id"], "fake")
+        self.assertEqual(meeting.minutes_last_error, "")
+        self.assertIsNotNone(meeting.minutes_generated_at)
+        self.assertIn("customer portal", fake_client.transcripts[0])
+
+
 class FakeTranscriptionClient:
     def __init__(self):
         self.sequences = []
@@ -165,4 +245,21 @@ class FakeTranscriptionClient:
             text=f"Transcript {segment.sequence_number}",
             model="fake-transcribe",
             raw_response={"text": f"Transcript {segment.sequence_number}"},
+        )
+
+
+class FakeMinutesClient:
+    def __init__(self):
+        self.transcripts = []
+
+    def generate(self, meeting: Meeting) -> MinutesResult:
+        transcript = "\n".join(
+            segment.transcription_text
+            for segment in meeting.segments.order_by("sequence_number")
+        )
+        self.transcripts.append(transcript)
+        return MinutesResult(
+            text="## Summary\n- Clear next step.",
+            model="fake-minutes",
+            raw_response={"id": "fake"},
         )

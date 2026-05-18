@@ -17,9 +17,19 @@ class AudioSegmentInline(admin.TabularInline):
 
 @admin.register(Meeting)
 class MeetingAdmin(admin.ModelAdmin):
-    list_display = ["id", "user", "title", "status", "started_at", "ended_at"]
-    list_filter = ["status", "started_at"]
+    list_display = [
+        "id",
+        "user",
+        "title",
+        "status",
+        "meeting_type",
+        "minutes_generated_at",
+        "started_at",
+        "ended_at",
+    ]
+    list_filter = ["status", "meeting_type", "started_at"]
     search_fields = ["id", "title", "user__username", "user__email"]
+    readonly_fields = ["minutes_generated_at", "minutes_model", "minutes_last_error"]
     inlines = [AudioSegmentInline]
 
 

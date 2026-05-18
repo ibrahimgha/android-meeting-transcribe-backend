@@ -1,0 +1,82 @@
+{% extends "meetings/base.html" %}
+
+{% block title %}Meetings - Meeting Transcribe{% endblock %}
+
+{% block content %}
+<header class="topbar">
+    <div>
+        <h1>Your meetings</h1>
+        <p class="subtitle">Signed in as {{ request.user.username }}</p>
+    </div>
+    <form class="logout-form" method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button class="secondary" type="submit">Log out</button>
+    </form>
+</header>
+
+{% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+            <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+{% if meetings %}
+    <section class="meeting-list">
+        {% for meeting in meetings %}
+            <article class="meeting">
+                <div class="meeting-header">
+                    <div>
+                        <h2 class="meeting-title">{{ meeting.title|default:"Mobile meeting" }}</h2>
+                        <div class="meta">
+                            {{ meeting.started_at|date:"Y-m-d H:i" }}
+                            {% if meeting.ended_at %}
+                                - {{ meeting.ended_at|date:"H:i" }}
+                            {% endif %}
+                            · {{ meeting.segment_count }} segments
+                            · {{ meeting.completed_transcription_count }} transcribed
+                        </div>
+                    </div>
+                    <div class="status">{{ meeting.get_status_display }}</div>
+                </div>
+
+                <form class="minutes-form" method="post" action="{% url 'web-generate-minutes' meeting.id %}">
+                    {% csrf_token %}
+                    <div>
+                        <label for="{{ meeting.minutes_form.meeting_type.id_for_label }}">
+                            Meeting type
+                        </label>
+                        {{ meeting.minutes_form.meeting_type }}
+                    </div>
+                    <button type="submit">Extract meeting minutes</button>
+                </form>
+
+                {% if meeting.minutes_last_error %}
+                    <div class="message error">{{ meeting.minutes_last_error }}</div>
+                {% endif %}
+
+                {% if meeting.minutes_text %}
+                    <section class="minutes">
+                        <h3>Meeting minutes</h3>
+                        <div class="meta">
+                            {{ meeting.get_meeting_type_display }}
+                            {% if meeting.minutes_generated_at %}
+                                · Generated {{ meeting.minutes_generated_at|date:"Y-m-d H:i" }}
+                            {% endif %}
+                            {% if meeting.minutes_model %}
+                                · {{ meeting.minutes_model }}
+                            {% endif %}
+                        </div>
+                        <pre>{{ meeting.minutes_text }}</pre>
+                    </section>
+                {% endif %}
+            </article>
+        {% endfor %}
+    </section>
+{% else %}
+    <section class="empty">
+        No meetings yet.
+    </section>
+{% endif %}
+{% endblock %}

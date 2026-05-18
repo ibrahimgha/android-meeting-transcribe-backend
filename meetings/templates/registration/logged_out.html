@@ -1,0 +1,11 @@
+{% extends "meetings/base.html" %}
+
+{% block title %}Logged out - Meeting Transcribe{% endblock %}
+
+{% block content %}
+<section class="login-panel">
+    <h1>Logged out</h1>
+    <p class="subtitle">You have been logged out.</p>
+    <p><a class="button" href="{% url 'login' %}">Log in again</a></p>
+</section>
+{% endblock %}

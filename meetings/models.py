@@ -20,6 +20,12 @@ class SegmentStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class MeetingType(models.TextChoices):
+    REQUIREMENT_GATHERING = "requirement_gathering", "Requirement gathering"
+    FOLLOWUP_MEETING = "followup_meeting", "Followup meeting"
+    DRAFT_DELIVERY = "draft_delivery", "Draft delivery"
+
+
 def segment_upload_path(instance: "AudioSegment", filename: str) -> str:
     extension = Path(filename).suffix.lower() or ".wav"
     return (
@@ -43,6 +49,16 @@ class Meeting(models.Model):
     )
     started_at = models.DateTimeField(default=timezone.now)
     ended_at = models.DateTimeField(null=True, blank=True)
+    meeting_type = models.CharField(
+        max_length=32,
+        choices=MeetingType.choices,
+        blank=True,
+    )
+    minutes_text = models.TextField(blank=True)
+    minutes_model = models.CharField(max_length=80, blank=True)
+    minutes_response = models.JSONField(default=dict, blank=True)
+    minutes_generated_at = models.DateTimeField(null=True, blank=True)
+    minutes_last_error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
