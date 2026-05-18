@@ -123,7 +123,30 @@ class OpenAIMeetingOutputClient:
             ],
         )
         raw = serialize_response(response)
-        return TextResult(text=cap_words(response.choices[0].message.content or "", 12), raw_response=raw)
+        text = response.choices[0].message.content or ""
+        if len(text.split()) > 12:
+            rewrite = self.client.chat.completions.create(
+                model=self.model,
+                temperature=0.1,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Rewrite labels in fluent English using 12 words or fewer.",
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "The previous label was too long or awkward. Rewrite it in 12 words or fewer, "
+                            "without dangling words.\n\n"
+                            f"Previous label: {text}\n\n"
+                            f"Transcript:\n{draft.transcript_text}"
+                        ),
+                    },
+                ],
+            )
+            raw = serialize_response(rewrite)
+            text = rewrite.choices[0].message.content or ""
+        return TextResult(text=cap_words(text, 12), raw_response=raw)
 
     def generate_title(self, meeting: Meeting, drafts: list[MessageDraft]) -> TextResult:
         response = self.client.chat.completions.create(
