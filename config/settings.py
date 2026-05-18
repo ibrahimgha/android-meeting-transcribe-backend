@@ -67,12 +67,23 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+DATABASE_ENGINE = os.environ.get("DB_ENGINE", "django.db.backends.sqlite3")
 DATABASES = {
     "default": {
-        "ENGINE": os.environ.get("DB_ENGINE", "django.db.backends.sqlite3"),
+        "ENGINE": DATABASE_ENGINE,
         "NAME": os.environ.get("DB_NAME", str(BASE_DIR / "db.sqlite3")),
     }
 }
+
+if DATABASE_ENGINE != "django.db.backends.sqlite3":
+    DATABASES["default"].update(
+        {
+            "USER": os.environ.get("DB_USER", ""),
+            "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+            "HOST": os.environ.get("DB_HOST", ""),
+            "PORT": os.environ.get("DB_PORT", ""),
+        }
+    )
 
 AUTH_PASSWORD_VALIDATORS = [
     {
