@@ -1,5 +1,6 @@
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from django.conf import settings
@@ -32,9 +33,14 @@ class OpenAITranscriptionClient:
 
     def transcribe(self, segment: AudioSegment) -> TranscriptionResult:
         with default_storage.open(segment.audio_file.name, "rb") as audio_file:
+            file_payload = (
+                Path(segment.audio_file.name).name,
+                audio_file.read(),
+                segment.audio_content_type or "audio/wav",
+            )
             response = self.client.audio.transcriptions.create(
                 model=self.model,
-                file=audio_file,
+                file=file_payload,
                 response_format="json",
             )
 
