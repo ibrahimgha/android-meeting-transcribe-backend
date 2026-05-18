@@ -26,6 +26,13 @@ class MeetingType(models.TextChoices):
     DRAFT_DELIVERY = "draft_delivery", "Draft delivery"
 
 
+class MeetingOutputStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    PROCESSING = "processing", "Processing"
+    COMPLETE = "complete", "Complete"
+    FAILED = "failed", "Failed"
+
+
 def segment_upload_path(instance: "AudioSegment", filename: str) -> str:
     extension = Path(filename).suffix.lower() or ".wav"
     return (
@@ -59,6 +66,19 @@ class Meeting(models.Model):
     minutes_response = models.JSONField(default=dict, blank=True)
     minutes_generated_at = models.DateTimeField(null=True, blank=True)
     minutes_last_error = models.TextField(blank=True)
+    output_status = models.CharField(
+        max_length=16,
+        choices=MeetingOutputStatus.choices,
+        default=MeetingOutputStatus.PENDING,
+        db_index=True,
+    )
+    output_model = models.CharField(max_length=80, blank=True)
+    output_response = models.JSONField(default=dict, blank=True)
+    output_generated_at = models.DateTimeField(null=True, blank=True)
+    output_last_error = models.TextField(blank=True)
+    title_model = models.CharField(max_length=80, blank=True)
+    title_response = models.JSONField(default=dict, blank=True)
+    title_generated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -147,3 +167,49 @@ class AudioSegment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.meeting_id} #{self.sequence_number} {self.speaker_label}"
+
+
+class MeetingMessage(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    meeting = models.ForeignKey(
+        Meeting,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="meeting_messages",
+    )
+    segments = models.ManyToManyField(
+        AudioSegment,
+        related_name="display_messages",
+        blank=True,
+    )
+    sequence_number = models.PositiveIntegerField()
+    speaker_label = models.CharField(max_length=64, blank=True)
+    client_start_ms = models.PositiveBigIntegerField(default=0)
+    client_end_ms = models.PositiveBigIntegerField(default=0)
+    transcript_text = models.TextField()
+    detailed_summary = models.TextField(blank=True)
+    short_summary = models.CharField(max_length=180, blank=True)
+    detailed_summary_response = models.JSONField(default=dict, blank=True)
+    short_summary_response = models.JSONField(default=dict, blank=True)
+    summary_model = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["meeting__started_at", "meeting_id", "sequence_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["meeting", "sequence_number"],
+                name="unique_message_sequence_per_meeting",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["meeting", "sequence_number"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.meeting_id} message #{self.sequence_number}"

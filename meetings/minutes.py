@@ -90,6 +90,15 @@ def generate_minutes_for_meeting(
 
 
 def build_transcript(meeting: Meeting) -> str:
+    messages = list(meeting.messages.order_by("sequence_number"))
+    if messages:
+        return "\n".join(
+            f"[{format_timestamp(message.client_start_ms)}-{format_timestamp(message.client_end_ms)}] "
+            f"{message.speaker_label}: {message.transcript_text.strip()}"
+            for message in messages
+            if message.transcript_text.strip()
+        )
+
     lines = []
     for segment in meeting.segments.order_by("sequence_number"):
         text = (segment.transcription_text or "").strip()

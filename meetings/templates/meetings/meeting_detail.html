@@ -1,0 +1,135 @@
+{% extends "meetings/base.html" %}
+
+{% block title %}{{ meeting.title|default:"Meeting" }} - Meeting Transcribe{% endblock %}
+
+{% block content %}
+<header class="topbar">
+    <div>
+        <p><a href="{% url 'web-meetings' %}">Back to meetings</a></p>
+        <h1>{{ meeting.title|default:"Mobile meeting" }}</h1>
+        <p class="subtitle">
+            {{ meeting.started_at|date:"Y-m-d H:i" }}
+            {% if meeting.ended_at %}
+                - {{ meeting.ended_at|date:"H:i" }}
+            {% endif %}
+            · {{ meeting.get_status_display }}
+            · {{ meeting.segment_count }} segments
+            · {{ meeting.completed_transcription_count }} transcribed
+            · Message processing: {{ meeting.get_output_status_display }}
+        </p>
+    </div>
+    <form class="logout-form" method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button class="secondary" type="submit">Log out</button>
+    </form>
+</header>
+
+{% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+            <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+{% if meeting.output_last_error %}
+    <div class="message error">{{ meeting.output_last_error }}</div>
+{% endif %}
+
+<article class="meeting">
+    <form class="minutes-form" method="post" action="{% url 'web-generate-minutes' meeting.id %}">
+        {% csrf_token %}
+        <div>
+            <label for="{{ minutes_form.meeting_type.id_for_label }}">
+                Meeting type
+            </label>
+            {{ minutes_form.meeting_type }}
+        </div>
+        <button type="submit">Extract meeting minutes</button>
+    </form>
+
+    <form class="actions" method="post" action="{% url 'web-generate-outputs' meeting.id %}">
+        {% csrf_token %}
+        <button class="secondary" type="submit">Rebuild messages and summaries</button>
+        {% if meeting.output_generated_at %}
+            <span class="meta">
+                Last rebuilt {{ meeting.output_generated_at|date:"Y-m-d H:i" }}
+                {% if meeting.output_model %} · {{ meeting.output_model }}{% endif %}
+            </span>
+        {% endif %}
+    </form>
+
+    {% if meeting.minutes_last_error %}
+        <div class="message error">{{ meeting.minutes_last_error }}</div>
+    {% endif %}
+
+    {% if meeting.minutes_text %}
+        <section class="minutes">
+            <h3>Meeting minutes</h3>
+            <div class="meta">
+                {{ meeting.get_meeting_type_display }}
+                {% if meeting.minutes_generated_at %}
+                    · Generated {{ meeting.minutes_generated_at|date:"Y-m-d H:i" }}
+                {% endif %}
+                {% if meeting.minutes_model %}
+                    · {{ meeting.minutes_model }}
+                {% endif %}
+            </div>
+            <pre>{{ meeting.minutes_text }}</pre>
+        </section>
+    {% endif %}
+</article>
+
+<h2 class="section-title">Messages</h2>
+
+{% if meeting.messages.all %}
+    {% for display_message in meeting.messages.all %}
+        <article class="message-detail">
+            <div class="message-heading">
+                <div>
+                    <h3>{{ display_message.short_summary|default:"Message" }}</h3>
+                    <div class="meta">
+                        Message {{ display_message.sequence_number }}
+                        · {{ display_message.speaker_label }}
+                        · {{ display_message.client_start_ms }}-{{ display_message.client_end_ms }} ms
+                    </div>
+                </div>
+            </div>
+
+            <div class="audio-list">
+                {% for segment in display_message.segments.all %}
+                    <div class="audio-item">
+                        <div class="meta">
+                            Segment {{ segment.sequence_number }}
+                            · {{ segment.speaker_label }}
+                            · {{ segment.client_start_ms }}-{{ segment.client_end_ms }} ms
+                        </div>
+                        {% if segment.audio_file %}
+                            <audio controls preload="none" src="{{ segment.audio_file.url }}"></audio>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div class="summary-grid">
+                <div class="summary-box">
+                    <h4>Full transcript</h4>
+                    <pre>{{ display_message.transcript_text }}</pre>
+                </div>
+                <div class="summary-box">
+                    <h4>Detailed English summary</h4>
+                    <p>{{ display_message.detailed_summary|linebreaksbr }}</p>
+                </div>
+                <div class="summary-box">
+                    <h4>12-word English summary</h4>
+                    <p>{{ display_message.short_summary }}</p>
+                </div>
+            </div>
+        </article>
+    {% endfor %}
+{% else %}
+    <section class="empty">
+        No processed messages yet.
+    </section>
+{% endif %}
+{% endblock %}

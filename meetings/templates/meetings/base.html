@@ -132,6 +132,13 @@
             gap: 12px;
             margin: 14px 0;
         }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            margin: 14px 0;
+        }
         label {
             display: block;
             margin-bottom: 5px;
@@ -168,6 +175,66 @@
             padding: 14px;
             font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
             font-size: 14px;
+        }
+        .message-detail {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 18px;
+        }
+        .message-detail + .message-detail {
+            margin-top: 16px;
+        }
+        .message-heading {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+        .message-heading h3 {
+            margin: 0;
+            font-size: 18px;
+        }
+        .audio-list {
+            display: grid;
+            gap: 10px;
+            margin: 12px 0 16px;
+        }
+        .audio-item {
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 10px;
+            background: #f8fafd;
+        }
+        audio {
+            display: block;
+            width: 100%;
+            margin-top: 8px;
+        }
+        .section-title {
+            margin: 18px 0 10px;
+            font-size: 22px;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .summary-box {
+            border: 1px solid var(--line);
+            border-radius: 7px;
+            padding: 12px;
+            background: #fbfcff;
+        }
+        .summary-box h4 {
+            margin: 0 0 8px;
+            font-size: 14px;
+            color: var(--muted);
+        }
+        .summary-box p {
+            margin: 0;
         }
         .empty {
             background: #ffffff;
@@ -211,6 +278,12 @@
             }
             .minutes-form {
                 display: grid;
+            }
+            .actions {
+                display: grid;
+            }
+            .message-heading {
+                display: block;
             }
             button,
             select {

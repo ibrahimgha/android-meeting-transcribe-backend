@@ -133,6 +133,10 @@ OPENAI_TRANSCRIBE_MODEL = os.environ.get(
     "gpt-4o-mini-transcribe",
 )
 OPENAI_MINUTES_MODEL = os.environ.get("OPENAI_MINUTES_MODEL", "gpt-4o-mini")
+OPENAI_MEETING_ANALYSIS_MODEL = os.environ.get(
+    "OPENAI_MEETING_ANALYSIS_MODEL",
+    "gpt-4o-mini",
+)
 MAX_AUDIO_SEGMENT_BYTES = int(os.environ.get("MAX_AUDIO_SEGMENT_BYTES", 25 * 1024 * 1024))
 
 LOGIN_REDIRECT_URL = "/meetings/"

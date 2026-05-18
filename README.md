@@ -66,7 +66,14 @@ The default transcription model is `gpt-4o-mini-transcribe`. Override with `OPEN
 ## Web Meeting Minutes
 
 Open `/meetings/` in a browser and log in with the same Django user used by the mobile app.
-For each meeting, choose one of:
+Open a meeting detail page to review processed messages. Each displayed message includes:
+
+- The source audio segments with browser playback controls.
+- The merged full transcript.
+- A detailed English summary.
+- A 12-word-or-fewer English summary.
+
+On the meeting detail page, choose one of:
 
 - Requirement gathering
 - Followup meeting
@@ -75,6 +82,16 @@ For each meeting, choose one of:
 Then click **Extract meeting minutes**. The backend sends the meeting transcript to OpenAI and stores
 the generated Markdown minutes on the meeting. The default minutes model is `gpt-4o-mini`; override
 with `OPENAI_MINUTES_MODEL`.
+
+After a meeting finishes transcribing, the transcription worker also asks OpenAI to combine segments
+into displayed messages, summarize each message, and generate a meeting title. The default model is
+`gpt-4o-mini`; override with `OPENAI_MEETING_ANALYSIS_MODEL`.
+
+To rebuild outputs manually:
+
+```powershell
+.\.venv\Scripts\python.exe manage.py process_meeting_outputs --latest --force
+```
 
 ## Tests
 

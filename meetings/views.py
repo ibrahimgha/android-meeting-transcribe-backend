@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Meeting, MeetingStatus
+from .postprocessing import maybe_process_completed_meeting
 from .serializers import (
     AuthTokenSerializer,
     LoginSerializer,
@@ -89,6 +90,7 @@ class MeetingViewSet(viewsets.ReadOnlyModelViewSet):
         meeting.status = MeetingStatus.ENDED
         meeting.save(update_fields=["ended_at", "status", "updated_at"])
         meeting.refresh_completion_status()
+        maybe_process_completed_meeting(meeting)
 
         return Response(self.get_serializer(meeting).data)
 

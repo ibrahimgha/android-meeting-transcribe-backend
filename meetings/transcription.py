@@ -140,6 +140,9 @@ def process_next_pending_segment(
         )
 
     segment.meeting.refresh_completion_status()
+    from .postprocessing import maybe_process_completed_meeting
+
+    maybe_process_completed_meeting(segment.meeting)
     return segment
 
 

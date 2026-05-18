@@ -10,7 +10,16 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from .minutes import MinutesResult, generate_minutes_for_meeting
-from .models import AudioSegment, Meeting, MeetingStatus, MeetingType, SegmentStatus
+from .models import (
+    AudioSegment,
+    Meeting,
+    MeetingMessage,
+    MeetingOutputStatus,
+    MeetingStatus,
+    MeetingType,
+    SegmentStatus,
+)
+from .postprocessing import MessageDraft, TextResult, process_meeting_outputs
 from .transcription import TranscriptionResult, process_next_pending_segment
 
 User = get_user_model()
@@ -234,6 +243,58 @@ class MeetingMinutesTests(TestCase):
         self.assertIsNotNone(meeting.minutes_generated_at)
         self.assertIn("customer portal", fake_client.transcripts[0])
 
+    def test_detail_page_lists_processed_messages_and_audio(self):
+        meeting = self.make_meeting(title="Processed meeting")
+        message = MeetingMessage.objects.create(
+            meeting=meeting,
+            user=self.user,
+            sequence_number=1,
+            speaker_label="person_1",
+            client_start_ms=0,
+            client_end_ms=5000,
+            transcript_text="person_1: We need a customer portal with approvals.",
+            detailed_summary="The customer portal needs approvals.",
+            short_summary="Customer portal needs approvals",
+        )
+        message.segments.set(meeting.segments.all())
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.get(f"/meetings/{meeting.id}/")
+
+        self.assertContains(response, "Processed meeting")
+        self.assertContains(response, "Extract meeting minutes")
+        self.assertContains(response, "Customer portal needs approvals")
+        self.assertContains(response, "<audio", html=False)
+
+    def test_process_meeting_outputs_creates_messages_summaries_and_title(self):
+        meeting = self.make_meeting(title="")
+        AudioSegment.objects.create(
+            meeting=meeting,
+            user=self.user,
+            sequence_number=2,
+            speaker_label="person_1",
+            client_start_ms=5000,
+            client_end_ms=9000,
+            transcription_status=SegmentStatus.COMPLETE,
+            transcription_text="It should also export reports.",
+            audio_file=ContentFile(wav_bytes(), name="seg_2.wav"),
+            audio_size_bytes=len(wav_bytes()),
+            audio_content_type="audio/wav",
+        )
+        fake_client = FakeMeetingOutputClient()
+
+        process_meeting_outputs(meeting, client=fake_client, force=True)
+
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.output_status, MeetingOutputStatus.COMPLETE)
+        self.assertEqual(meeting.title, "Customer Portal Planning")
+        self.assertEqual(meeting.messages.count(), 1)
+        message = meeting.messages.get()
+        self.assertEqual(list(message.segments.order_by("sequence_number").values_list("sequence_number", flat=True)), [1, 2])
+        self.assertIn("export reports", message.transcript_text)
+        self.assertEqual(message.detailed_summary, "Detailed summary without missing details.")
+        self.assertEqual(message.short_summary, "Short summary")
+
 
 class FakeTranscriptionClient:
     def __init__(self):
@@ -262,4 +323,33 @@ class FakeMinutesClient:
             text="## Summary\n- Clear next step.",
             model="fake-minutes",
             raw_response={"id": "fake"},
+        )
+
+
+class FakeMeetingOutputClient:
+    model = "fake-output"
+
+    def compile_messages(self, meeting: Meeting, segments: list[AudioSegment]):
+        draft = MessageDraft(
+            sequence_numbers=[segment.sequence_number for segment in segments],
+            speaker_label="person_1",
+            transcript_text="\n".join(segment.transcription_text for segment in segments),
+            client_start_ms=min(segment.client_start_ms for segment in segments),
+            client_end_ms=max(segment.client_end_ms for segment in segments),
+        )
+        return [draft], {"id": "compile"}
+
+    def summarize_message(self, draft: MessageDraft) -> TextResult:
+        return TextResult(
+            text="Detailed summary without missing details.",
+            raw_response={"id": "detailed"},
+        )
+
+    def summarize_message_short(self, draft: MessageDraft) -> TextResult:
+        return TextResult(text="Short summary", raw_response={"id": "short"})
+
+    def generate_title(self, meeting: Meeting, drafts: list[MessageDraft]) -> TextResult:
+        return TextResult(
+            text="Customer Portal Planning",
+            raw_response={"id": "title"},
         )

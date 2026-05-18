@@ -41,36 +41,11 @@
                     <div class="status">{{ meeting.get_status_display }}</div>
                 </div>
 
-                <form class="minutes-form" method="post" action="{% url 'web-generate-minutes' meeting.id %}">
-                    {% csrf_token %}
-                    <div>
-                        <label for="{{ meeting.minutes_form.meeting_type.id_for_label }}">
-                            Meeting type
-                        </label>
-                        {{ meeting.minutes_form.meeting_type }}
-                    </div>
-                    <button type="submit">Extract meeting minutes</button>
-                </form>
-
-                {% if meeting.minutes_last_error %}
-                    <div class="message error">{{ meeting.minutes_last_error }}</div>
-                {% endif %}
-
-                {% if meeting.minutes_text %}
-                    <section class="minutes">
-                        <h3>Meeting minutes</h3>
-                        <div class="meta">
-                            {{ meeting.get_meeting_type_display }}
-                            {% if meeting.minutes_generated_at %}
-                                · Generated {{ meeting.minutes_generated_at|date:"Y-m-d H:i" }}
-                            {% endif %}
-                            {% if meeting.minutes_model %}
-                                · {{ meeting.minutes_model }}
-                            {% endif %}
-                        </div>
-                        <pre>{{ meeting.minutes_text }}</pre>
-                    </section>
-                {% endif %}
+                <p>
+                    <a class="button" href="{% url 'web-meeting-detail' meeting.id %}">
+                        Open meeting
+                    </a>
+                </p>
             </article>
         {% endfor %}
     </section>
