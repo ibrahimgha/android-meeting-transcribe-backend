@@ -301,6 +301,8 @@ class MeetingMinutesTests(TestCase):
         self.assertContains(response, "Extract meeting minutes")
         self.assertContains(response, "Paste in proposal generator")
         self.assertContains(response, "proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/")
+        self.assertContains(response, 'window.open(destination, "_blank"', html=False)
+        self.assertNotContains(response, "window.location.href = destination")
         self.assertContains(response, "Customer portal needs approvals")
         self.assertContains(response, "<audio", html=False)
 

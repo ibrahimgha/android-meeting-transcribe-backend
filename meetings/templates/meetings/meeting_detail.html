@@ -171,7 +171,12 @@
                 button.textContent = "Copying...";
                 try {
                     await copyText(source.value);
-                    window.location.href = destination;
+                    const proposalWindow = window.open(destination, "_blank", "noopener,noreferrer");
+                    if (proposalWindow) {
+                        proposalWindow.opener = null;
+                    }
+                    button.disabled = false;
+                    button.textContent = originalText;
                 } catch (error) {
                     button.disabled = false;
                     button.textContent = originalText;
