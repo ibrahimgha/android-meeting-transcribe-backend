@@ -19,6 +19,7 @@ from .models import (
     MeetingType,
     SegmentStatus,
 )
+from .openai_utils import chat_completion_options
 from .postprocessing import MessageDraft, TextResult, process_meeting_outputs
 from .transcription import TranscriptionResult, process_next_pending_segment
 
@@ -267,6 +268,13 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Summary, Key Discussion Points, Decisions", prompt)
         self.assertIn("Focus on business goals, user needs", prompt)
         self.assertIn("may contain transcription mistakes", prompt)
+
+    def test_gpt_55_minutes_options_omit_temperature(self):
+        self.assertEqual(chat_completion_options("gpt-5.5", temperature=0.2), {"model": "gpt-5.5"})
+        self.assertEqual(
+            chat_completion_options("gpt-4o-mini", temperature=0.2),
+            {"model": "gpt-4o-mini", "temperature": 0.2},
+        )
 
     def test_detail_page_lists_processed_messages_and_audio(self):
         meeting = self.make_meeting(title="Processed meeting")

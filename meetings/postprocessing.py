@@ -16,6 +16,7 @@ from .models import (
     MeetingStatus,
     SegmentStatus,
 )
+from .openai_utils import chat_completion_options
 
 
 class MeetingOutputConfigurationError(RuntimeError):
@@ -55,8 +56,7 @@ class OpenAIMeetingOutputClient:
         segments: list[AudioSegment],
     ) -> tuple[list[MessageDraft], dict[str, Any]]:
         response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0.1,
+            **chat_completion_options(self.model, temperature=0.1),
             response_format={"type": "json_object"},
             messages=[
                 {
@@ -79,8 +79,7 @@ class OpenAIMeetingOutputClient:
 
     def summarize_message(self, draft: MessageDraft) -> TextResult:
         response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0.2,
+            **chat_completion_options(self.model, temperature=0.2),
             messages=[
                 {
                     "role": "system",
@@ -106,8 +105,7 @@ class OpenAIMeetingOutputClient:
 
     def summarize_message_short(self, draft: MessageDraft) -> TextResult:
         response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0.2,
+            **chat_completion_options(self.model, temperature=0.2),
             messages=[
                 {
                     "role": "system",
@@ -126,8 +124,7 @@ class OpenAIMeetingOutputClient:
         text = response.choices[0].message.content or ""
         if len(text.split()) > 12:
             rewrite = self.client.chat.completions.create(
-                model=self.model,
-                temperature=0.1,
+                **chat_completion_options(self.model, temperature=0.1),
                 messages=[
                     {
                         "role": "system",
@@ -150,8 +147,7 @@ class OpenAIMeetingOutputClient:
 
     def generate_title(self, meeting: Meeting, drafts: list[MessageDraft]) -> TextResult:
         response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0.2,
+            **chat_completion_options(self.model, temperature=0.2),
             messages=[
                 {
                     "role": "system",

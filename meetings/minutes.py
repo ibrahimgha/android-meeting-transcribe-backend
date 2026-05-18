@@ -6,6 +6,7 @@ from django.utils import timezone
 from openai import OpenAI
 
 from .models import Meeting, MeetingType
+from .openai_utils import chat_completion_options
 
 
 class MinutesConfigurationError(RuntimeError):
@@ -37,8 +38,7 @@ class OpenAIMinutesClient:
             raise MinutesInputError("This meeting does not have completed transcriptions yet.")
 
         response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0.2,
+            **chat_completion_options(self.model, temperature=0.2),
             messages=[
                 {
                     "role": "system",
