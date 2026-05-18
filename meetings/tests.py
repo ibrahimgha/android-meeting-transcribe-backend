@@ -278,6 +278,9 @@ class MeetingMinutesTests(TestCase):
 
     def test_detail_page_lists_processed_messages_and_audio(self):
         meeting = self.make_meeting(title="Processed meeting")
+        meeting.minutes_text = "- The system must support approvals."
+        meeting.minutes_model = "fake-minutes"
+        meeting.save(update_fields=["minutes_text", "minutes_model"])
         message = MeetingMessage.objects.create(
             meeting=meeting,
             user=self.user,
@@ -296,8 +299,22 @@ class MeetingMinutesTests(TestCase):
 
         self.assertContains(response, "Processed meeting")
         self.assertContains(response, "Extract meeting minutes")
+        self.assertContains(response, "Paste in proposal generator")
+        self.assertContains(response, "proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/")
         self.assertContains(response, "Customer portal needs approvals")
         self.assertContains(response, "<audio", html=False)
+
+    def test_proposal_generator_button_only_for_gathered_requirements(self):
+        meeting = self.make_meeting(title="Followup")
+        meeting.meeting_type = MeetingType.FOLLOWUP_MEETING
+        meeting.minutes_text = "## Summary\n- Followup notes."
+        meeting.save(update_fields=["meeting_type", "minutes_text"])
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.get(f"/meetings/{meeting.id}/")
+
+        self.assertNotContains(response, "Paste in proposal generator")
+        self.assertNotContains(response, "proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/")
 
     def test_process_meeting_outputs_creates_messages_summaries_and_title(self):
         meeting = self.make_meeting(title="")

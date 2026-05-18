@@ -71,13 +71,21 @@
                 {% if meeting.minutes_generated_at %}
                     · Generated {{ meeting.minutes_generated_at|date:"Y-m-d H:i" }}
                 {% endif %}
-                {% if meeting.minutes_model %}
-                    · {{ meeting.minutes_model }}
-                {% endif %}
+            {% if meeting.minutes_model %}
+                · {{ meeting.minutes_model }}
+            {% endif %}
+        </div>
+        {% if meeting.meeting_type == "requirement_gathering" %}
+            <div class="actions">
+                <textarea id="proposal-requirements-text" class="clipboard-source" readonly>{{ meeting.minutes_text }}</textarea>
+                <button id="paste-in-proposal-generator" type="button">
+                    Paste in proposal generator
+                </button>
             </div>
-            <pre>{{ meeting.minutes_text }}</pre>
-        </section>
-    {% endif %}
+        {% endif %}
+        <pre>{{ meeting.minutes_text }}</pre>
+    </section>
+{% endif %}
 </article>
 
 <h2 class="section-title">Messages</h2>
@@ -131,5 +139,46 @@
     <section class="empty">
         No processed messages yet.
     </section>
+{% endif %}
+{% if meeting.minutes_text and meeting.meeting_type == "requirement_gathering" %}
+    <script>
+        (function () {
+            const button = document.getElementById("paste-in-proposal-generator");
+            const source = document.getElementById("proposal-requirements-text");
+            const destination = "https://proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/";
+
+            if (!button || !source) {
+                return;
+            }
+
+            async function copyText(text) {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    return;
+                }
+                source.focus();
+                source.select();
+                const copied = document.execCommand("copy");
+                source.blur();
+                if (!copied) {
+                    throw new Error("Clipboard copy failed.");
+                }
+            }
+
+            button.addEventListener("click", async function () {
+                button.disabled = true;
+                const originalText = button.textContent;
+                button.textContent = "Copying...";
+                try {
+                    await copyText(source.value);
+                    window.location.href = destination;
+                } catch (error) {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                    alert("Could not copy the requirements. Please copy them manually.");
+                }
+            });
+        })();
+    </script>
 {% endif %}
 {% endblock %}
