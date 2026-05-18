@@ -9,7 +9,7 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
-from .minutes import MinutesResult, generate_minutes_for_meeting
+from .minutes import MinutesResult, build_minutes_prompt, generate_minutes_for_meeting
 from .models import (
     AudioSegment,
     Meeting,
@@ -242,6 +242,31 @@ class MeetingMinutesTests(TestCase):
         self.assertEqual(meeting.minutes_last_error, "")
         self.assertIsNotNone(meeting.minutes_generated_at)
         self.assertIn("customer portal", fake_client.transcripts[0])
+
+    def test_requirement_gathering_prompt_outputs_only_final_requirements(self):
+        meeting = self.make_meeting()
+        meeting.meeting_type = MeetingType.REQUIREMENT_GATHERING
+
+        prompt = build_minutes_prompt(
+            meeting,
+            "person_1: Add chat. person_2: Remove chat and use tickets instead.",
+        )
+
+        self.assertIn("Output only the final gathered requirements", prompt)
+        self.assertIn("If something was discussed and later removed, omit it completely", prompt)
+        self.assertIn("keep only the more recent requirement", prompt)
+        self.assertIn("Do not include headings, sections", prompt)
+        self.assertNotIn("Action Items", prompt)
+
+    def test_requirement_gathering_minutes_keeps_minutes_sections(self):
+        meeting = self.make_meeting()
+        meeting.meeting_type = MeetingType.REQUIREMENT_GATHERING_MINUTES
+
+        prompt = build_minutes_prompt(meeting, "person_1: We need approvals.")
+
+        self.assertIn("Summary, Key Discussion Points, Decisions", prompt)
+        self.assertIn("Focus on business goals, user needs", prompt)
+        self.assertIn("may contain transcription mistakes", prompt)
 
     def test_detail_page_lists_processed_messages_and_audio(self):
         meeting = self.make_meeting(title="Processed meeting")

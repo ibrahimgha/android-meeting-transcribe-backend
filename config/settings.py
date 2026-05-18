@@ -132,7 +132,7 @@ OPENAI_TRANSCRIBE_MODEL = os.environ.get(
     "OPENAI_TRANSCRIBE_MODEL",
     "gpt-4o-mini-transcribe",
 )
-OPENAI_MINUTES_MODEL = os.environ.get("OPENAI_MINUTES_MODEL", "gpt-4o-mini")
+OPENAI_MINUTES_MODEL = os.environ.get("OPENAI_MINUTES_MODEL", "gpt-5.5")
 OPENAI_MEETING_ANALYSIS_MODEL = os.environ.get(
     "OPENAI_MEETING_ANALYSIS_MODEL",
     "gpt-4o-mini",

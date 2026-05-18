@@ -5,7 +5,7 @@ from django.conf import settings
 from django.utils import timezone
 from openai import OpenAI
 
-from .models import Meeting
+from .models import Meeting, MeetingType
 
 
 class MinutesConfigurationError(RuntimeError):
@@ -43,9 +43,12 @@ class OpenAIMinutesClient:
                 {
                     "role": "system",
                     "content": (
-                        "You produce crisp, useful meeting minutes from diarized transcripts. "
-                        "Use only the transcript content. Do not invent facts. If something is unclear, "
-                        "mark it as unclear. Preserve speaker labels when assigning owners."
+                        "You produce faithful meeting outputs from diarized transcripts. "
+                        "These transcripts came from recorded audio, so some words may be mistranscribed. "
+                        "When a word or phrase makes no sense, infer the intended wording from context "
+                        "only when the correction is reasonably clear. Use only the transcript content. "
+                        "Do not invent facts. If something remains unclear, mark it as unclear. "
+                        "Preserve speaker labels when assigning owners."
                     ),
                 },
                 {
@@ -112,8 +115,11 @@ def build_transcript(meeting: Meeting) -> str:
 
 def build_minutes_prompt(meeting: Meeting, transcript: str) -> str:
     meeting_type = meeting.get_meeting_type_display() if meeting.meeting_type else "Unspecified"
+    if meeting.meeting_type == MeetingType.REQUIREMENT_GATHERING:
+        return build_requirements_prompt(meeting, transcript, meeting_type)
+
     type_guidance = {
-        "requirement_gathering": (
+        "requirement_gathering_minutes": (
             "Focus on business goals, user needs, functional requirements, non-functional requirements, "
             "constraints, assumptions, open questions, risks, decisions, and next steps."
         ),
@@ -134,10 +140,33 @@ Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
 
 Instructions:
 - Write concise meeting minutes in Markdown.
+- This transcript came from recorded audio and may contain transcription mistakes. If a word or phrase makes no sense, deduce the likely intended wording from context when reasonably clear; otherwise mark it as unclear.
 - Include these sections: Summary, Key Discussion Points, Decisions, Action Items, Open Questions, Risks or Blockers.
 - For action items, include Owner, Task, Due date, and Evidence. Use "Unassigned" or "Not stated" when missing.
 - Tailor the output to this meeting type: {type_guidance}
 - Keep the wording professional and practical.
+
+Transcript:
+{transcript}
+"""
+
+
+def build_requirements_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
+    return f"""Meeting type: {meeting_type}
+Meeting title: {meeting.title or "Untitled meeting"}
+Started at: {meeting.started_at.isoformat()}
+Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
+
+Instructions:
+- This is a transcribed requirements gathering meeting. The transcript may contain transcription mistakes. If a word or phrase makes no sense, deduce the likely intended wording from context when reasonably clear; otherwise mark it as unclear.
+- Do not summarize the meeting.
+- Output only the final gathered requirements.
+- Return a concise Markdown bullet list, one requirement per bullet.
+- Do not include headings, sections, meeting recap, action items, decisions, open questions, risks, participants, timestamps, or other fluff.
+- If something was discussed and later removed, omit it completely from the requirements.
+- If one requirement contradicts another, keep only the more recent requirement and omit the older conflicting requirement completely.
+- Requirements must be written as clear product or business requirements, not as notes about who said what.
+- Use only information supported by the transcript after applying the removal and recency rules above.
 
 Transcript:
 {transcript}

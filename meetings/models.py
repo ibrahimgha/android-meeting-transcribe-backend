@@ -22,6 +22,10 @@ class SegmentStatus(models.TextChoices):
 
 class MeetingType(models.TextChoices):
     REQUIREMENT_GATHERING = "requirement_gathering", "Requirement gathering"
+    REQUIREMENT_GATHERING_MINUTES = (
+        "requirement_gathering_minutes",
+        "Requirement gathering minutes",
+    )
     FOLLOWUP_MEETING = "followup_meeting", "Followup meeting"
     DRAFT_DELIVERY = "draft_delivery", "Draft delivery"
 

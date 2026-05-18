@@ -76,12 +76,17 @@ Open a meeting detail page to review processed messages. Each displayed message 
 On the meeting detail page, choose one of:
 
 - Requirement gathering
+- Requirement gathering minutes
 - Followup meeting
 - Draft delivery
 
 Then click **Extract meeting minutes**. The backend sends the meeting transcript to OpenAI and stores
-the generated Markdown minutes on the meeting. The default minutes model is `gpt-4o-mini`; override
+the generated Markdown minutes on the meeting. The default minutes model is `gpt-5.5`; override
 with `OPENAI_MINUTES_MODEL`.
+
+The Requirement gathering option generates only the final gathered requirements. It omits removed
+or superseded requirements and does not include meeting-minutes sections. Use Requirement gathering
+minutes when you want normal meeting minutes for a requirements discussion.
 
 After a meeting finishes transcribing, the transcription worker also asks OpenAI to combine segments
 into displayed messages, summarize each message, and generate a meeting title. The default model is
