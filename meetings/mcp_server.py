@@ -41,9 +41,10 @@ def build_server() -> FastMCP:
     return FastMCP(
         name="android-meeting-transcribe",
         instructions=(
-            "Use this server to inspect meeting recordings, import previous audio recordings, "
-            "check transcription and segmentation status, rebuild message summaries, and extract "
-            "meeting minutes for the configured authenticated Django user."
+            "Use this server to perform the same meeting-recorder tasks available to the "
+            "configured authenticated Django user: inspect meetings, start/end meetings, upload "
+            "audio segments, import previous recordings, check processing progress, rebuild "
+            "message summaries, extract meeting minutes, and retrieve PM notes PDFs."
         ),
         host=settings.MCP_HOST,
         port=settings.MCP_PORT,
@@ -72,6 +73,18 @@ mcp = build_server()
 
 
 @mcp.tool()
+async def get_current_user() -> dict:
+    """Return the configured Django user that this MCP server acts as."""
+    return await sync_to_async(mcp_api.get_current_user, thread_sensitive=True)()
+
+
+@mcp.tool()
+async def list_meeting_types() -> dict:
+    """List meeting types accepted by extract_meeting_minutes, including which support PDF output."""
+    return await sync_to_async(mcp_api.list_meeting_types, thread_sensitive=True)()
+
+
+@mcp.tool()
 async def list_meetings(limit: int = 20, status: str = "") -> dict:
     """List meetings for the configured MCP user. Optional status: recording, ended, complete, failed."""
     return await sync_to_async(mcp_api.list_meetings, thread_sensitive=True)(
@@ -81,9 +94,31 @@ async def list_meetings(limit: int = 20, status: str = "") -> dict:
 
 
 @mcp.tool()
+async def start_meeting(title: str = "") -> dict:
+    """Create a new recording meeting for the configured user."""
+    return await sync_to_async(mcp_api.start_meeting, thread_sensitive=True)(title=title)
+
+
+@mcp.tool()
+async def end_meeting(meeting_id: str, ended_at: str = "", rebuild_outputs: bool = True) -> dict:
+    """End a currently recording meeting. ended_at may be an ISO-8601 datetime."""
+    return await sync_to_async(mcp_api.end_meeting, thread_sensitive=True)(
+        meeting_id,
+        ended_at=ended_at,
+        rebuild_outputs=rebuild_outputs,
+    )
+
+
+@mcp.tool()
 async def get_meeting(meeting_id: str) -> dict:
     """Get meeting metadata, import status, transcript segments, processed messages, and minutes."""
     return await sync_to_async(mcp_api.get_meeting, thread_sensitive=True)(meeting_id)
+
+
+@mcp.tool()
+async def get_meeting_progress(meeting_id: str) -> dict:
+    """Get the same processing progress payload shown on the meeting detail page."""
+    return await sync_to_async(mcp_api.get_meeting_progress, thread_sensitive=True)(meeting_id)
 
 
 @mcp.tool()
@@ -103,9 +138,97 @@ async def import_recording_from_url(
 
 
 @mcp.tool()
+async def import_recording_from_base64(
+    filename: str,
+    content_base64: str,
+    title: str = "",
+    content_type: str = "",
+) -> dict:
+    """Queue a previous WAV, MP3, M4A, or MP4 recording supplied as base64 content."""
+    return await sync_to_async(mcp_api.import_recording_from_base64, thread_sensitive=True)(
+        filename=filename,
+        content_base64=content_base64,
+        title=title,
+        content_type=content_type,
+    )
+
+
+@mcp.tool()
+async def upload_audio_segment_from_url(
+    meeting_id: str,
+    audio_url: str,
+    sequence_number: int,
+    speaker_label: str,
+    client_start_ms: int,
+    client_end_ms: int,
+    client_segment_id: str = "",
+    speaker_confidence: float | None = None,
+    codec: str = "",
+    sample_rate: int | None = None,
+    original_filename: str = "",
+    process_now: bool = False,
+) -> dict:
+    """Upload one meeting audio segment from an HTTP(S) URL, matching the mobile app segment upload flow."""
+    return await sync_to_async(mcp_api.upload_audio_segment_from_url, thread_sensitive=True)(
+        meeting_id=meeting_id,
+        audio_url=audio_url,
+        sequence_number=sequence_number,
+        speaker_label=speaker_label,
+        client_start_ms=client_start_ms,
+        client_end_ms=client_end_ms,
+        client_segment_id=client_segment_id,
+        speaker_confidence=speaker_confidence,
+        codec=codec,
+        sample_rate=sample_rate,
+        original_filename=original_filename,
+        process_now=process_now,
+    )
+
+
+@mcp.tool()
+async def upload_audio_segment_from_base64(
+    meeting_id: str,
+    filename: str,
+    content_base64: str,
+    sequence_number: int,
+    speaker_label: str,
+    client_start_ms: int,
+    client_end_ms: int,
+    client_segment_id: str = "",
+    speaker_confidence: float | None = None,
+    codec: str = "",
+    sample_rate: int | None = None,
+    content_type: str = "",
+    process_now: bool = False,
+) -> dict:
+    """Upload one meeting audio segment supplied as base64 content."""
+    return await sync_to_async(mcp_api.upload_audio_segment_from_base64, thread_sensitive=True)(
+        meeting_id=meeting_id,
+        filename=filename,
+        content_base64=content_base64,
+        sequence_number=sequence_number,
+        speaker_label=speaker_label,
+        client_start_ms=client_start_ms,
+        client_end_ms=client_end_ms,
+        client_segment_id=client_segment_id,
+        speaker_confidence=speaker_confidence,
+        codec=codec,
+        sample_rate=sample_rate,
+        content_type=content_type,
+        process_now=process_now,
+    )
+
+
+@mcp.tool()
 async def process_one_import_job() -> dict:
     """Process one pending imported recording immediately. The background worker also does this automatically."""
     return await sync_to_async(mcp_api.process_one_import_job, thread_sensitive=True)()
+
+
+@mcp.tool()
+async def process_one_transcription_job() -> dict:
+    """Process one pending audio segment immediately. The background worker also does this automatically."""
+    return await sync_to_async(mcp_api.process_one_transcription_job, thread_sensitive=True)()
 
 
 @mcp.tool()
@@ -114,6 +237,14 @@ async def extract_meeting_minutes(meeting_id: str, meeting_type: str) -> dict:
     return await sync_to_async(mcp_api.extract_meeting_minutes, thread_sensitive=True)(
         meeting_id,
         meeting_type,
+    )
+
+
+@mcp.tool()
+async def get_project_manager_notes_pdf(meeting_id: str) -> dict:
+    """Return the PM notes PDF as base64 content for a project_manager_notes meeting."""
+    return await sync_to_async(mcp_api.get_project_manager_notes_pdf, thread_sensitive=True)(
+        meeting_id
     )
 
 

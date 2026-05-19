@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import math
@@ -460,6 +461,81 @@ class MeetingMcpApiTests(TestCase):
         self.assertEqual(payload["id"], str(meeting.id))
         self.assertEqual(payload["segments"][0]["transcription_text"], "Hello from the MCP test.")
         self.assertTrue(payload["segments"][0]["audio_url"].startswith("https://example.test/media/"))
+
+    def test_mcp_exposes_user_and_meeting_types(self):
+        user_payload = mcp_api.get_current_user()
+        type_payload = mcp_api.list_meeting_types()
+
+        self.assertEqual(user_payload["username"], "mcp-user")
+        self.assertIn(
+            {
+                "value": MeetingType.PROJECT_MANAGER_NOTES,
+                "label": "Project manager notes",
+                "supports_pdf": True,
+            },
+            type_payload["meeting_types"],
+        )
+
+    def test_mcp_start_end_and_progress_meeting(self):
+        started = mcp_api.start_meeting(title="Agent-created meeting")
+
+        self.assertEqual(started["title"], "Agent-created meeting")
+        self.assertEqual(started["status"], MeetingStatus.RECORDING)
+
+        progress = mcp_api.get_meeting_progress(started["id"])
+        self.assertEqual(progress["percent"], 100)
+        self.assertEqual(progress["message"], "Complete")
+
+        ended = mcp_api.end_meeting(started["id"], rebuild_outputs=False)
+        self.assertEqual(ended["status"], MeetingStatus.COMPLETE)
+        self.assertIsNotNone(ended["ended_at"])
+
+    def test_mcp_upload_audio_segment_from_base64(self):
+        meeting = Meeting.objects.create(user=self.user, title="Recording", status=MeetingStatus.RECORDING)
+
+        segment = mcp_api.upload_audio_segment_from_base64(
+            meeting_id=str(meeting.id),
+            filename="segment.wav",
+            content_base64=base64.b64encode(wav_bytes()).decode("ascii"),
+            sequence_number=1,
+            speaker_label="person_1",
+            client_start_ms=0,
+            client_end_ms=1000,
+            content_type="audio/wav",
+        )
+
+        self.assertEqual(segment["sequence_number"], 1)
+        self.assertEqual(segment["transcription_status"], SegmentStatus.PENDING)
+        self.assertTrue(segment["audio_url"].startswith("https://example.test/media/"))
+
+    def test_mcp_import_recording_from_base64(self):
+        payload = mcp_api.import_recording_from_base64(
+            filename="old-meeting.mp3",
+            content_base64=base64.b64encode(wav_bytes()).decode("ascii"),
+            title="Old meeting",
+            content_type="audio/mpeg",
+        )
+
+        self.assertEqual(payload["meeting"]["title"], "Old meeting")
+        self.assertEqual(payload["import"]["status"], MeetingImportStatus.PENDING)
+        self.assertEqual(payload["import"]["original_filename"], "old-meeting.mp3")
+
+    def test_mcp_project_manager_pdf_returns_base64_pdf(self):
+        meeting = self.make_meeting(title="PM notes")
+        meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
+        meeting.minutes_text = (
+            "Meeting Details:\n\nDate: 2026-05-19\nTime: 09:52 UTC\n"
+            "Location/Platform: Not specified\n\nAttendees:\n\nNot specified\n\n"
+            "Discussion Points:\n\nTopic\n\n- Keep all details."
+        )
+        meeting.save(update_fields=["meeting_type", "minutes_text"])
+
+        payload = mcp_api.get_project_manager_notes_pdf(str(meeting.id))
+        pdf_bytes = base64.b64decode(payload["content_base64"])
+
+        self.assertEqual(payload["content_type"], "application/pdf")
+        self.assertTrue(payload["filename"].endswith("-pm-notes.pdf"))
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
 
 
 class MeetingMinutesTests(TestCase):
