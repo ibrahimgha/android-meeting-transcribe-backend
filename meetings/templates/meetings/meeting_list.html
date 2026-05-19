@@ -22,6 +22,23 @@
     </div>
 {% endif %}
 
+<section class="meeting import-panel">
+    <h2 class="meeting-title">Import a previous recording</h2>
+    <form class="import-form" method="post" action="{% url 'web-import-meeting' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div>
+            <label for="{{ import_form.title.id_for_label }}">{{ import_form.title.label }}</label>
+            {{ import_form.title }}
+        </div>
+        <div>
+            <label for="{{ import_form.recording_file.id_for_label }}">{{ import_form.recording_file.label }}</label>
+            {{ import_form.recording_file }}
+        </div>
+        <button type="submit">Import recording</button>
+    </form>
+    <p class="meta">WAV recordings are processed in the background, then added here as normal meetings.</p>
+</section>
+
 {% if meetings %}
     <section class="meeting-list">
         {% for meeting in meetings %}

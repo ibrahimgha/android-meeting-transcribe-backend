@@ -36,6 +36,25 @@
     <div class="message error">{{ meeting.output_last_error }}</div>
 {% endif %}
 
+{% if meeting.imports.all %}
+    <section class="meeting">
+        <h2 class="meeting-title">Imported recording</h2>
+        {% for import_job in meeting.imports.all %}
+            <div class="meta">
+                {{ import_job.original_filename|default:"Uploaded recording" }}
+                · {{ import_job.get_status_display }}
+                · {{ import_job.created_segments }} segments created
+                {% if import_job.processed_at %}
+                    · Processed {{ import_job.processed_at|date:"Y-m-d H:i" }}
+                {% endif %}
+            </div>
+            {% if import_job.last_error %}
+                <div class="message error">{{ import_job.last_error }}</div>
+            {% endif %}
+        {% endfor %}
+    </section>
+{% endif %}
+
 <article class="meeting">
     <form class="minutes-form" method="post" action="{% url 'web-generate-minutes' meeting.id %}">
         {% csrf_token %}

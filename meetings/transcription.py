@@ -155,6 +155,15 @@ def run_transcription_loop(
     processed = 0
 
     while True:
+        from .import_processing import process_next_pending_import
+
+        import_job = process_next_pending_import()
+        if import_job is not None:
+            processed += 1
+            if limit is not None and processed >= limit:
+                return processed
+            continue
+
         segment = process_next_pending_segment()
         if segment is not None:
             processed += 1

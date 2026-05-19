@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AudioSegment, Meeting, MeetingMessage
+from .models import AudioSegment, Meeting, MeetingImport, MeetingMessage
 
 
 class AudioSegmentInline(admin.TabularInline):
@@ -34,6 +34,27 @@ class MeetingMessageInline(admin.TabularInline):
     ]
 
 
+class MeetingImportInline(admin.TabularInline):
+    model = MeetingImport
+    extra = 0
+    readonly_fields = [
+        "id",
+        "original_filename",
+        "status",
+        "created_segments",
+        "last_error",
+        "created_at",
+    ]
+    fields = [
+        "id",
+        "original_filename",
+        "status",
+        "created_segments",
+        "last_error",
+        "created_at",
+    ]
+
+
 @admin.register(Meeting)
 class MeetingAdmin(admin.ModelAdmin):
     list_display = [
@@ -59,7 +80,7 @@ class MeetingAdmin(admin.ModelAdmin):
         "title_generated_at",
         "title_model",
     ]
-    inlines = [MeetingMessageInline, AudioSegmentInline]
+    inlines = [MeetingImportInline, MeetingMessageInline, AudioSegmentInline]
 
 
 @admin.register(AudioSegment)
@@ -96,3 +117,18 @@ class MeetingMessageAdmin(admin.ModelAdmin):
         "detailed_summary",
         "short_summary",
     ]
+
+
+@admin.register(MeetingImport)
+class MeetingImportAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "meeting",
+        "user",
+        "original_filename",
+        "status",
+        "created_segments",
+        "created_at",
+    ]
+    list_filter = ["status", "created_at"]
+    search_fields = ["id", "meeting__id", "original_filename", "user__username"]

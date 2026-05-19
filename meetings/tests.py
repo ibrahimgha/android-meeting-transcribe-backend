@@ -1,3 +1,6 @@
+import io
+import math
+import wave
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -10,9 +13,12 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from .minutes import MinutesResult, build_minutes_prompt, generate_minutes_for_meeting
+from .import_processing import process_next_pending_import
 from .models import (
     AudioSegment,
     Meeting,
+    MeetingImport,
+    MeetingImportStatus,
     MeetingMessage,
     MeetingOutputStatus,
     MeetingStatus,
@@ -28,6 +34,29 @@ User = get_user_model()
 
 def wav_bytes() -> bytes:
     return b"RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80>\x00\x00\x00}\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+
+
+def voiced_wav_bytes(sample_rate=16_000) -> bytes:
+    output = io.BytesIO()
+    parts = [
+        (1.25, 440.0, 0.24),
+        (0.35, None, 0.0),
+        (1.25, 660.0, 0.22),
+    ]
+    with wave.open(output, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        frames = bytearray()
+        for seconds, frequency, amplitude in parts:
+            sample_count = int(seconds * sample_rate)
+            for index in range(sample_count):
+                value = 0.0
+                if frequency is not None:
+                    value = amplitude * math.sin(2.0 * math.pi * frequency * index / sample_rate)
+                frames.extend(int(value * 32767).to_bytes(2, "little", signed=True))
+        wav_file.writeframes(bytes(frames))
+    return output.getvalue()
 
 
 class MeetingApiTests(APITestCase):
@@ -125,6 +154,25 @@ class MeetingApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_import_recording_creates_pending_background_job(self):
+        response = self.client.post(
+            "/api/meetings/import/",
+            {
+                "title": "Imported workshop",
+                "recording_file": ContentFile(voiced_wav_bytes(), name="workshop.wav"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        meeting = Meeting.objects.get(id=response.data["meeting"]["id"])
+        import_job = MeetingImport.objects.get(meeting=meeting)
+        self.assertEqual(meeting.user, self.user)
+        self.assertEqual(meeting.status, MeetingStatus.ENDED)
+        self.assertEqual(meeting.title, "Imported workshop")
+        self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
+        self.assertEqual(meeting.segments.count(), 0)
+
 
 class TranscriptionQueueTests(TestCase):
     def setUp(self):
@@ -168,14 +216,63 @@ class TranscriptionQueueTests(TestCase):
         self.assertIsNone(process_next_pending_segment())
 
 
+class MeetingImportQueueTests(TestCase):
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.settings_override = override_settings(MEDIA_ROOT=self.temp_dir.name)
+        self.settings_override.enable()
+        self.user = User.objects.create_user(username="import-user")
+        self.meeting = Meeting.objects.create(
+            user=self.user,
+            title="Imported audio",
+            status=MeetingStatus.ENDED,
+        )
+
+    def tearDown(self):
+        self.settings_override.disable()
+        self.temp_dir.cleanup()
+
+    def test_process_next_pending_import_creates_pending_segments(self):
+        import_job = MeetingImport.objects.create(
+            meeting=self.meeting,
+            user=self.user,
+            source_file=ContentFile(voiced_wav_bytes(), name="source.wav"),
+            original_filename="source.wav",
+            content_type="audio/wav",
+            size_bytes=len(voiced_wav_bytes()),
+        )
+
+        processed = process_next_pending_import()
+
+        self.assertEqual(processed.id, import_job.id)
+        import_job.refresh_from_db()
+        self.meeting.refresh_from_db()
+        self.assertEqual(import_job.status, MeetingImportStatus.COMPLETE)
+        self.assertGreaterEqual(import_job.created_segments, 1)
+        self.assertEqual(self.meeting.status, MeetingStatus.ENDED)
+        self.assertIsNotNone(self.meeting.ended_at)
+        segment = self.meeting.segments.order_by("sequence_number").first()
+        self.assertIsNotNone(segment)
+        self.assertEqual(segment.transcription_status, SegmentStatus.PENDING)
+        self.assertEqual(segment.codec, "wav_pcm16")
+        self.assertTrue(segment.audio_file.name.endswith(".wav"))
+
+
 class MeetingMinutesTests(TestCase):
     def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.settings_override = override_settings(MEDIA_ROOT=self.temp_dir.name)
+        self.settings_override.enable()
         self.user = User.objects.create_user(
             username="web-user",
             password="strong-password-123",
         )
         self.other_user = User.objects.create_user(username="other-web-user")
         self.client = Client()
+
+    def tearDown(self):
+        self.settings_override.disable()
+        self.temp_dir.cleanup()
 
     def make_meeting(self, user=None, title="Discovery call") -> Meeting:
         meeting = Meeting.objects.create(
@@ -214,6 +311,25 @@ class MeetingMinutesTests(TestCase):
 
         self.assertContains(response, own_meeting.title)
         self.assertNotContains(response, "Other meeting")
+        self.assertContains(response, "Import a previous recording")
+
+    def test_web_import_upload_redirects_to_detail_and_queues_job(self):
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.post(
+            "/meetings/import/",
+            {
+                "title": "Old call",
+                "recording_file": ContentFile(voiced_wav_bytes(), name="old-call.wav"),
+            },
+        )
+
+        meeting = Meeting.objects.get(title="Old call")
+        import_job = MeetingImport.objects.get(meeting=meeting)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(str(meeting.id), response["Location"])
+        self.assertEqual(meeting.user, self.user)
+        self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
 
     def test_generate_minutes_saves_type_and_calls_extractor(self):
         meeting = self.make_meeting()

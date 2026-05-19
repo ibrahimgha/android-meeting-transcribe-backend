@@ -20,6 +20,8 @@ from .serializers import (
     SegmentUploadSerializer,
     UserSerializer,
     AudioSegmentSerializer,
+    MeetingImportCreateSerializer,
+    MeetingImportSerializer,
 )
 
 
@@ -79,6 +81,21 @@ class MeetingViewSet(viewsets.ReadOnlyModelViewSet):
         )
         response = self.get_serializer(meeting)
         return Response(response.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_recording(self, request):
+        serializer = MeetingImportCreateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        import_job = serializer.save()
+        meeting_data = self.get_serializer(import_job.meeting).data
+        import_data = MeetingImportSerializer(import_job).data
+        return Response(
+            {"meeting": meeting_data, "import": import_data},
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], url_path="end")
     def end(self, request, pk=None):

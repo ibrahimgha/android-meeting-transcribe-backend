@@ -132,6 +132,16 @@
             gap: 12px;
             margin: 14px 0;
         }
+        .import-panel {
+            margin-bottom: 22px;
+        }
+        .import-form {
+            display: grid;
+            grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr) auto;
+            gap: 12px;
+            align-items: end;
+            margin: 14px 0 8px;
+        }
         .actions {
             display: flex;
             flex-wrap: wrap;
@@ -286,6 +296,9 @@
             }
             .minutes-form {
                 display: grid;
+            }
+            .import-form {
+                grid-template-columns: 1fr;
             }
             .actions {
                 display: grid;

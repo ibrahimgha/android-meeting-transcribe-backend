@@ -4,7 +4,7 @@ from meetings.transcription import run_transcription_loop
 
 
 class Command(BaseCommand):
-    help = "Process pending audio segments sequentially through OpenAI transcription."
+    help = "Process pending meeting imports and audio segments sequentially."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -31,4 +31,4 @@ class Command(BaseCommand):
             limit=options["limit"],
             sleep_seconds=options["sleep"],
         )
-        self.stdout.write(self.style.SUCCESS(f"Processed {processed} audio segment(s)."))
+        self.stdout.write(self.style.SUCCESS(f"Processed {processed} queue item(s)."))

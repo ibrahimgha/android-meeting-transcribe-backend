@@ -138,6 +138,9 @@ OPENAI_MEETING_ANALYSIS_MODEL = os.environ.get(
     "gpt-4o-mini",
 )
 MAX_AUDIO_SEGMENT_BYTES = int(os.environ.get("MAX_AUDIO_SEGMENT_BYTES", 25 * 1024 * 1024))
+MAX_IMPORT_RECORDING_BYTES = int(
+    os.environ.get("MAX_IMPORT_RECORDING_BYTES", 500 * 1024 * 1024)
+)
 
 LOGIN_REDIRECT_URL = "/meetings/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"

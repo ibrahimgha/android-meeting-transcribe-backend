@@ -3,9 +3,10 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import AudioSegment, Meeting, MeetingStatus
+from .models import AudioSegment, Meeting, MeetingImport, MeetingStatus
 
 User = get_user_model()
 
@@ -119,6 +120,66 @@ class MeetingSerializer(serializers.ModelSerializer):
 
 class MeetingStartSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=160, required=False, allow_blank=True)
+
+
+class MeetingImportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MeetingImport
+        fields = [
+            "id",
+            "meeting",
+            "original_filename",
+            "content_type",
+            "size_bytes",
+            "status",
+            "created_segments",
+            "started_at",
+            "processed_at",
+            "last_error",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class MeetingImportCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    recording_file = serializers.FileField(write_only=True)
+
+    def validate_recording_file(self, value):
+        if value.size > settings.MAX_IMPORT_RECORDING_BYTES:
+            raise serializers.ValidationError(
+                "Recording is larger than the configured import limit."
+            )
+
+        extension = Path(value.name).suffix.lower().lstrip(".")
+        if extension != "wav":
+            raise serializers.ValidationError(
+                "Only WAV recordings are supported for server-side import right now."
+            )
+        return value
+
+    def create(self, validated_data):
+        request = self.context["request"]
+        recording_file = validated_data["recording_file"]
+        title = validated_data.get("title", "").strip()
+        if not title:
+            title = Path(recording_file.name).stem[:160] or "Imported meeting"
+
+        meeting = Meeting.objects.create(
+            user=request.user,
+            title=title,
+            status=MeetingStatus.ENDED,
+            ended_at=timezone.now(),
+        )
+        return MeetingImport.objects.create(
+            meeting=meeting,
+            user=request.user,
+            source_file=recording_file,
+            original_filename=recording_file.name,
+            content_type=getattr(recording_file, "content_type", "") or "",
+            size_bytes=recording_file.size,
+        )
 
 
 class SegmentUploadSerializer(serializers.ModelSerializer):

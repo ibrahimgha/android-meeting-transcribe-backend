@@ -20,6 +20,13 @@ class SegmentStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class MeetingImportStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    PROCESSING = "processing", "Processing"
+    COMPLETE = "complete", "Complete"
+    FAILED = "failed", "Failed"
+
+
 class MeetingType(models.TextChoices):
     REQUIREMENT_GATHERING = "requirement_gathering", "Requirement gathering"
     REQUIREMENT_GATHERING_MINUTES = (
@@ -43,6 +50,11 @@ def segment_upload_path(instance: "AudioSegment", filename: str) -> str:
         f"meetings/{instance.meeting_id}/segments/"
         f"{instance.sequence_number:06d}-{uuid4().hex}{extension}"
     )
+
+
+def meeting_import_upload_path(instance: "MeetingImport", filename: str) -> str:
+    extension = Path(filename).suffix.lower() or ".wav"
+    return f"meetings/{instance.meeting_id}/imports/{uuid4().hex}{extension}"
 
 
 class Meeting(models.Model):
@@ -113,6 +125,46 @@ class Meeting(models.Model):
         if self.status != next_status:
             self.status = next_status
             self.save(update_fields=["status", "updated_at"])
+
+
+class MeetingImport(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    meeting = models.ForeignKey(
+        Meeting,
+        on_delete=models.CASCADE,
+        related_name="imports",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="meeting_imports",
+    )
+    source_file = models.FileField(upload_to=meeting_import_upload_path)
+    original_filename = models.CharField(max_length=255, blank=True)
+    content_type = models.CharField(max_length=120, blank=True)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    status = models.CharField(
+        max_length=16,
+        choices=MeetingImportStatus.choices,
+        default=MeetingImportStatus.PENDING,
+        db_index=True,
+    )
+    created_segments = models.PositiveIntegerField(default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["meeting", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.meeting_id} import {self.id}"
 
 
 class AudioSegment(models.Model):
