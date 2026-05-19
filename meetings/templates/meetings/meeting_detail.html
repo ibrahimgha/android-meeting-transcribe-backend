@@ -134,6 +134,13 @@
                 </button>
             </div>
         {% endif %}
+        {% if meeting.meeting_type == "project_manager_notes" %}
+            <div class="actions">
+                <a class="button" href="{% url 'web-meeting-minutes-pdf' meeting.id %}">
+                    Download PM notes PDF
+                </a>
+            </div>
+        {% endif %}
         <pre>{{ meeting.minutes_text }}</pre>
     </section>
 {% endif %}

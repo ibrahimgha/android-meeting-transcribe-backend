@@ -6,6 +6,7 @@ from .web_views import (
     FinishChunkedImportView,
     ImportMeetingRecordingView,
     MeetingDetailView,
+    MeetingMinutesPdfView,
     MeetingListView,
     MeetingProgressView,
     StartChunkedImportView,
@@ -28,6 +29,7 @@ urlpatterns = [
     ),
     path("<uuid:pk>/", MeetingDetailView.as_view(), name="web-meeting-detail"),
     path("<uuid:pk>/progress/", MeetingProgressView.as_view(), name="web-meeting-progress"),
+    path("<uuid:pk>/minutes/pdf/", MeetingMinutesPdfView.as_view(), name="web-meeting-minutes-pdf"),
     path("<uuid:pk>/minutes/", GenerateMeetingMinutesView.as_view(), name="web-generate-minutes"),
     path("<uuid:pk>/outputs/", GenerateMeetingOutputsView.as_view(), name="web-generate-outputs"),
 ]

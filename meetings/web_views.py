@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
 from django.core.files import File
-from django.http import JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
@@ -18,6 +18,7 @@ from django.views.generic import DetailView, ListView
 from .forms import MeetingImportForm, MeetingMinutesForm
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .minutes import generate_minutes_for_meeting
+from .pdf import build_pm_notes_pdf
 from .postprocessing import process_meeting_outputs
 from .models import (
     AudioSegment,
@@ -26,6 +27,7 @@ from .models import (
     MeetingImportStatus,
     MeetingOutputStatus,
     MeetingStatus,
+    MeetingType,
     SegmentStatus,
 )
 
@@ -283,6 +285,19 @@ class GenerateMeetingMinutesView(LoginRequiredMixin, View):
         return redirect("web-meeting-detail", pk=meeting.pk)
 
 
+class MeetingMinutesPdfView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        meeting = get_object_or_404(Meeting, pk=pk, user=request.user)
+        if meeting.meeting_type != MeetingType.PROJECT_MANAGER_NOTES or not meeting.minutes_text.strip():
+            raise Http404("Project manager notes PDF is not available for this meeting.")
+
+        pdf_bytes = build_pm_notes_pdf(meeting)
+        filename = f"{safe_filename(meeting.title or 'meeting-notes')}-pm-notes.pdf"
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+
 class MeetingProgressView(LoginRequiredMixin, View):
     def get(self, request, pk):
         meeting = get_object_or_404(Meeting, pk=pk, user=request.user)
@@ -310,6 +325,12 @@ def clear_import_upload_metadata(request, upload_id: str) -> None:
     uploads.pop(upload_id, None)
     request.session["meeting_import_uploads"] = uploads
     request.session.modified = True
+
+
+def safe_filename(value: str) -> str:
+    cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in value.lower())
+    cleaned = "-".join(part for part in cleaned.split("-") if part)
+    return cleaned[:80] or "meeting-notes"
 
 
 class GenerateMeetingOutputsView(LoginRequiredMixin, View):

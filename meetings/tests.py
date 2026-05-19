@@ -752,6 +752,22 @@ class MeetingMinutesTests(TestCase):
         self.assertContains(response, "Customer portal needs approvals")
         self.assertContains(response, "<audio", html=False)
 
+    def test_project_manager_notes_pdf_download(self):
+        meeting = self.make_meeting(title="PM Notes")
+        meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
+        meeting.minutes_text = "Meeting Details:\n\nDate: 2026-05-19\nTime: 10:00\nLocation/Platform: Google Meet\nAttendees:\n\nLujain\n\nDiscussion Points:\n\nAdmin Profile\n- Add an Admin Profile flow from the sidebar."
+        meeting.save(update_fields=["meeting_type", "minutes_text"])
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        detail_response = self.client.get(f"/meetings/{meeting.id}/")
+        pdf_response = self.client.get(f"/meetings/{meeting.id}/minutes/pdf/")
+
+        self.assertContains(detail_response, "Download PM notes PDF")
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(pdf_response["Content-Type"], "application/pdf")
+        self.assertTrue(bytes(pdf_response.content).startswith(b"%PDF"))
+        self.assertIn("attachment;", pdf_response["Content-Disposition"])
+
     def test_proposal_generator_button_only_for_gathered_requirements(self):
         meeting = self.make_meeting(title="Followup")
         meeting.meeting_type = MeetingType.FOLLOWUP_MEETING
