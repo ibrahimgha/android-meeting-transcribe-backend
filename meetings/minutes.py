@@ -1,3 +1,4 @@
+from datetime import timezone as datetime_timezone
 from dataclasses import dataclass
 from typing import Any
 
@@ -264,33 +265,39 @@ Transcript chunk:
 
 
 def build_project_manager_final_prompt(meeting: Meeting, extracted_chunk_notes: str) -> str:
+    meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
     return f"""Meeting title: {meeting.title or "Untitled meeting"}
+Metadata date: {meeting_date}
+Metadata time: {meeting_time}
 Started at: {meeting.started_at.isoformat()}
 Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
 
 You are given exhaustive notes extracted chunk-by-chunk from a full meeting transcript.
 
 Task:
-Consolidate the chunk notes into final project-manager meeting notes.
+Consolidate the chunk notes into final project-manager meeting notes that match the style, shape, and approximate length of the format below.
 
 Critical rules:
-- This is not a summary task.
-- Preserve every distinct concrete detail from the chunk notes.
-- Do not drop details under a summary pretext.
-- Do not merge multiple requested changes into one broad bullet if doing so loses specificity.
+- This is not a transcript recap and not a conversational summary.
+- The output can omit who said what, filler, repetitions, examples, and discussion wording.
+- The output must not omit information: every distinct requirement, decision, constraint, edge case, filter, field, role permission, screen/flow change, button, validation rule, and UX/design note must appear at least once.
+- Keep the notes around the same length and density as the reference format below. Prefer compact, information-rich bullets over long paragraphs.
+- Merge related wording into one bullet only when no information is lost.
 - Remove true duplicates only when the same point is repeated with no new detail.
 - If something is discussed and later removed, omit it completely.
 - If two points contradict each other, keep the later one and omit the earlier one.
+- Use implementation-ready wording, not "the team discussed" phrasing.
 - Output only the final meeting notes.
-- Use plain text, not Markdown.
+- Use plain text with hyphen bullets, not Markdown headings or tables.
 
 Use this exact structure:
 
 Meeting Details:
 
-Date: [Use the meeting date if known from metadata or notes, otherwise "Not specified"]
-Time: [Use the meeting time if known from metadata or notes, otherwise "Not specified"]
+Date: {meeting_date}
+Time: {meeting_time}
 Location/Platform: [Use the platform if known from the notes, otherwise "Not specified"]
+
 Attendees:
 
 [List attendee names, one per line. If attendees are unclear, write "Not specified"]
@@ -299,35 +306,70 @@ Discussion Points:
 
 [Group the discussion by product area, feature, flow, screen, role, or topic. Use concise headings and nested bullets.]
 
+Reference style and length:
+
+Meeting Details:
+
+Date: 2026-05-19
+Time: 09:52 UTC
+Location/Platform: Not specified
+
+Attendees:
+
+Not specified
+
+Discussion Points:
+
+Team Player Assignment Flow
+
+- Player assignment should be supported from both directions:
+  - From Team: add/assign players to the team.
+  - From Player: assign the player to a team or change the player’s team assignment.
+- Same concept applies to coaches/players where assignment can be managed from either the team side or the individual profile side.
+- The Player field is optional.
+- Final direction is to keep the assignment capability available both in Teams and in Players, not only in one place.
+
+Team Editing / Add Player Window
+
+- In team editing, adding players should allow selection from existing teams and unassigned players.
+- The add player window should support filtering by team, assigned/unassigned status, and position.
+- Existing windows can be reused where possible, but a new or adjusted window may be needed if the current one cannot support team-indexed assigned players.
+
 Extracted chunk notes:
 {extracted_chunk_notes}
 """
 
 
 def build_project_manager_notes_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
+    meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
     return f"""Meeting type: {meeting_type}
 Meeting title: {meeting.title or "Untitled meeting"}
+Metadata date: {meeting_date}
+Metadata time: {meeting_time}
 Started at: {meeting.started_at.isoformat()}
 Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
 
 Instructions:
 - You are generating meeting notes from a transcribed meeting.
 - The transcript may contain transcription mistakes, wrong speaker labels, missing punctuation, repeated phrases, or misheard product and feature names. Deduce the intended meaning when something sounds wrong, but do not invent requirements or decisions that are not supported by the transcript.
-- Write the notes in the same format and level of detail as professional project manager notes.
+- Write the notes in the same format, density, and approximate length as compact professional project manager notes.
 - Output only the meeting notes. Do not include an introduction, explanation, Markdown table, action-items section, or summary section unless the meeting itself explicitly had those items.
-- Use plain text, not Markdown.
-- This is not a summary task. Do not shorten the meeting by dropping detailed requested changes.
-- Include every distinct requested change, decision, edge case, role permission, screen/flow change, field, button, validation rule, and UX/design note that appears in the transcript.
-- When several small points belong under the same topic, keep them as separate lines or nested bullets instead of merging them into one broad bullet.
+- Use plain text with hyphen bullets, not Markdown headings or tables.
+- This is not a transcript recap and not a conversational summary.
+- The output can omit who said what, filler, repetitions, examples, and discussion wording.
+- The output must not omit information: every distinct requested change, decision, constraint, edge case, role permission, screen/flow change, field, button, validation rule, and UX/design note that appears in the transcript must appear at least once.
+- Keep the notes around the same length and density as the reference format below. Prefer compact, information-rich bullets over long paragraphs.
+- When several small points belong under the same topic, use nested bullets. Merge related wording only when no information is lost.
 - Before finalizing, review the transcript again and add any concrete detail that was not already captured.
 
 Use this exact structure:
 
 Meeting Details:
 
-Date: [Use the meeting date if known from metadata or transcript, otherwise "Not specified"]
-Time: [Use the meeting time if known from metadata or transcript, otherwise "Not specified"]
+Date: {meeting_date}
+Time: {meeting_time}
 Location/Platform: [Use the platform if known from the transcript, otherwise "Not specified"]
+
 Attendees:
 
 [List attendee names, one per line. If attendees are unclear, write "Not specified"]
@@ -355,6 +397,35 @@ For each discussion topic:
 - If the meeting discusses alternatives and later chooses one, include only the final chosen direction.
 - If something is discussed and later removed, omit it completely.
 - If two points contradict each other, keep the later one and omit the earlier one.
+
+Reference style and length:
+
+Meeting Details:
+
+Date: 2026-05-19
+Time: 09:52 UTC
+Location/Platform: Not specified
+
+Attendees:
+
+Not specified
+
+Discussion Points:
+
+Team Player Assignment Flow
+
+- Player assignment should be supported from both directions:
+  - From Team: add/assign players to the team.
+  - From Player: assign the player to a team or change the player’s team assignment.
+- Same concept applies to coaches/players where assignment can be managed from either the team side or the individual profile side.
+- The Player field is optional.
+- Final direction is to keep the assignment capability available both in Teams and in Players, not only in one place.
+
+Team Editing / Add Player Window
+
+- In team editing, adding players should allow selection from existing teams and unassigned players.
+- The add player window should support filtering by team, assigned/unassigned status, and position.
+- Existing windows can be reused where possible, but a new or adjusted window may be needed if the current one cannot support team-indexed assigned players.
 
 Transcript:
 {transcript}
@@ -388,6 +459,14 @@ def format_timestamp(milliseconds: int) -> str:
     minutes = total_seconds // 60
     seconds = total_seconds % 60
     return f"{minutes:02d}:{seconds:02d}"
+
+
+def meeting_datetime_for_prompt(meeting: Meeting) -> tuple[str, str]:
+    started_at = meeting.started_at
+    if not started_at:
+        return "Not specified", "Not specified"
+    started_at_utc = started_at.astimezone(datetime_timezone.utc)
+    return started_at_utc.strftime("%Y-%m-%d"), started_at_utc.strftime("%H:%M UTC")
 
 
 def serialize_response(response) -> dict[str, Any]:

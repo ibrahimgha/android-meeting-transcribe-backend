@@ -692,13 +692,17 @@ class MeetingMinutesTests(TestCase):
 
         self.assertIn("Use this exact structure:", prompt)
         self.assertIn("Meeting Details:", prompt)
-        self.assertIn("Date: [Use the meeting date", prompt)
+        self.assertIn("Date: 2026-05-19", prompt)
+        self.assertIn("Time:", prompt)
         self.assertIn("Attendees:", prompt)
         self.assertIn("Discussion Points:", prompt)
-        self.assertIn("professional project manager notes", prompt)
-        self.assertIn("Use plain text, not Markdown", prompt)
-        self.assertIn("This is not a summary task", prompt)
-        self.assertIn("Include every distinct requested change", prompt)
+        self.assertIn("compact professional project manager notes", prompt)
+        self.assertIn("Use plain text with hyphen bullets", prompt)
+        self.assertIn("This is not a transcript recap", prompt)
+        self.assertIn("must not omit information", prompt)
+        self.assertIn("Keep the notes around the same length and density", prompt)
+        self.assertIn("Reference style and length", prompt)
+        self.assertIn("Team Player Assignment Flow", prompt)
         self.assertIn("Before finalizing, review the transcript again", prompt)
         self.assertIn("If something is discussed and later removed, omit it completely", prompt)
 
@@ -710,9 +714,10 @@ class MeetingMinutesTests(TestCase):
         final_prompt = build_project_manager_final_prompt(meeting, "Chunk 1 notes:\n- Add chat buttons.")
 
         self.assertGreater(len(chunks), 1)
-        self.assertIn("This is not a summary task", final_prompt)
-        self.assertIn("Do not drop details under a summary pretext", final_prompt)
-        self.assertIn("Preserve every distinct concrete detail", final_prompt)
+        self.assertIn("This is not a transcript recap", final_prompt)
+        self.assertIn("must not omit information", final_prompt)
+        self.assertIn("Keep the notes around the same length and density", final_prompt)
+        self.assertIn("Reference style and length", final_prompt)
 
     def test_gpt_55_minutes_options_omit_temperature(self):
         self.assertEqual(chat_completion_options("gpt-5.5", temperature=0.2), {"model": "gpt-5.5"})
