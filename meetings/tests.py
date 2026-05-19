@@ -1,4 +1,5 @@
 import io
+import json
 import math
 import wave
 from tempfile import TemporaryDirectory
@@ -320,7 +321,10 @@ class MeetingMcpApiTests(TestCase):
 class MeetingMinutesTests(TestCase):
     def setUp(self):
         self.temp_dir = TemporaryDirectory()
-        self.settings_override = override_settings(MEDIA_ROOT=self.temp_dir.name)
+        self.settings_override = override_settings(
+            MEDIA_ROOT=self.temp_dir.name,
+            IMPORT_CHUNK_BYTES=1024,
+        )
         self.settings_override.enable()
         self.user = User.objects.create_user(
             username="web-user",
@@ -389,6 +393,52 @@ class MeetingMinutesTests(TestCase):
         self.assertIn(str(meeting.id), response["Location"])
         self.assertEqual(meeting.user, self.user)
         self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
+
+    def test_chunked_web_import_assembles_file_and_queues_job(self):
+        self.client.login(username=self.user.username, password="strong-password-123")
+        payload = voiced_wav_bytes()
+        chunk_size = 1024
+        total_chunks = math.ceil(len(payload) / chunk_size)
+
+        start_response = self.client.post(
+            "/meetings/import/chunked/start/",
+            data=json.dumps(
+                {
+                    "title": "Chunked old call",
+                    "filename": "chunked-old-call.wav",
+                    "content_type": "audio/wav",
+                    "total_size": len(payload),
+                    "chunk_size": chunk_size,
+                    "total_chunks": total_chunks,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(start_response.status_code, 201)
+        upload_id = start_response.json()["upload_id"]
+
+        for index in range(total_chunks):
+            start = index * chunk_size
+            end = min(start + chunk_size, len(payload))
+            chunk_response = self.client.post(
+                f"/meetings/import/chunked/{upload_id}/chunk/",
+                {
+                    "index": str(index),
+                    "chunk": ContentFile(payload[start:end], name=f"{index}.part"),
+                },
+            )
+            self.assertEqual(chunk_response.status_code, 200)
+
+        finish_response = self.client.post(f"/meetings/import/chunked/{upload_id}/finish/")
+
+        self.assertEqual(finish_response.status_code, 201)
+        meeting = Meeting.objects.get(title="Chunked old call")
+        import_job = MeetingImport.objects.get(meeting=meeting)
+        self.assertEqual(meeting.user, self.user)
+        self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
+        self.assertEqual(import_job.size_bytes, len(payload))
+        self.assertEqual(import_job.original_filename, "chunked-old-call.wav")
 
     def test_generate_minutes_saves_type_and_calls_extractor(self):
         meeting = self.make_meeting()

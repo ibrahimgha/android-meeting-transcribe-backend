@@ -24,7 +24,15 @@
 
 <section class="meeting import-panel">
     <h2 class="meeting-title">Import a previous recording</h2>
-    <form class="import-form" method="post" action="{% url 'web-import-meeting' %}" enctype="multipart/form-data">
+    <form
+        class="import-form"
+        id="meeting-import-form"
+        method="post"
+        action="{% url 'web-import-meeting' %}"
+        enctype="multipart/form-data"
+        data-chunk-size="{{ import_chunk_bytes }}"
+        data-start-url="{% url 'web-import-chunked-start' %}"
+    >
         {% csrf_token %}
         <div>
             <label for="{{ import_form.title.id_for_label }}">{{ import_form.title.label }}</label>
@@ -36,6 +44,7 @@
         </div>
         <button type="submit">Import recording</button>
     </form>
+    <div id="meeting-import-progress" class="meta import-progress" aria-live="polite"></div>
     <p class="meta">WAV recordings are processed in the background, then added here as normal meetings.</p>
 </section>
 
@@ -71,4 +80,92 @@
         No meetings yet.
     </section>
 {% endif %}
+
+<script>
+    (function () {
+        const form = document.getElementById("meeting-import-form");
+        const progress = document.getElementById("meeting-import-progress");
+        if (!form || !progress) {
+            return;
+        }
+
+        const fileInput = form.querySelector("input[type='file']");
+        const titleInput = form.querySelector("input[name='title']");
+        const csrfInput = form.querySelector("input[name='csrfmiddlewaretoken']");
+        const submitButton = form.querySelector("button[type='submit']");
+        const chunkSize = Number(form.dataset.chunkSize || "26214400");
+        const startUrl = form.dataset.startUrl;
+
+        function setProgress(text) {
+            progress.textContent = text;
+        }
+
+        async function jsonFetch(url, options) {
+            const response = await fetch(url, options);
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.detail || "Upload failed.");
+            }
+            return payload;
+        }
+
+        form.addEventListener("submit", async function (event) {
+            const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+            if (!file || file.size <= chunkSize) {
+                return;
+            }
+
+            event.preventDefault();
+            submitButton.disabled = true;
+            setProgress("Preparing upload...");
+
+            try {
+                const totalChunks = Math.ceil(file.size / chunkSize);
+                const start = await jsonFetch(startUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": csrfInput.value,
+                    },
+                    body: JSON.stringify({
+                        title: titleInput ? titleInput.value : "",
+                        filename: file.name,
+                        content_type: file.type || "audio/wav",
+                        total_size: file.size,
+                        chunk_size: chunkSize,
+                        total_chunks: totalChunks,
+                    }),
+                });
+
+                for (let index = 0; index < totalChunks; index += 1) {
+                    const begin = index * chunkSize;
+                    const end = Math.min(begin + chunkSize, file.size);
+                    const data = new FormData();
+                    data.append("index", String(index));
+                    data.append("chunk", file.slice(begin, end), file.name + ".part");
+                    await jsonFetch(`/meetings/import/chunked/${start.upload_id}/chunk/`, {
+                        method: "POST",
+                        headers: {
+                            "X-CSRFToken": csrfInput.value,
+                        },
+                        body: data,
+                    });
+                    setProgress(`Uploaded ${index + 1} of ${totalChunks} chunks`);
+                }
+
+                setProgress("Finalizing upload...");
+                const finish = await jsonFetch(`/meetings/import/chunked/${start.upload_id}/finish/`, {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": csrfInput.value,
+                    },
+                });
+                window.location.href = finish.meeting_url;
+            } catch (error) {
+                submitButton.disabled = false;
+                setProgress(error.message || "Upload failed.");
+            }
+        });
+    })();
+</script>
 {% endblock %}
