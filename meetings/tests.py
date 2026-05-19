@@ -652,6 +652,24 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Focus on business goals, user needs", prompt)
         self.assertIn("may contain transcription mistakes", prompt)
 
+    def test_project_manager_notes_prompt_matches_requested_format(self):
+        meeting = self.make_meeting(title="ScoutX planning")
+        meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
+
+        prompt = build_minutes_prompt(
+            meeting,
+            "person_1: Add a filter by team. person_2: Remove the save option from videos.",
+        )
+
+        self.assertIn("Use this exact structure:", prompt)
+        self.assertIn("Meeting Details:", prompt)
+        self.assertIn("Date: [Use the meeting date", prompt)
+        self.assertIn("Attendees:", prompt)
+        self.assertIn("Discussion Points:", prompt)
+        self.assertIn("professional project manager notes", prompt)
+        self.assertIn("Use plain text, not Markdown", prompt)
+        self.assertIn("If something is discussed and later removed, omit it completely", prompt)
+
     def test_gpt_55_minutes_options_omit_temperature(self):
         self.assertEqual(chat_completion_options("gpt-5.5", temperature=0.2), {"model": "gpt-5.5"})
         self.assertEqual(

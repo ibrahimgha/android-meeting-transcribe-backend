@@ -117,6 +117,8 @@ def build_minutes_prompt(meeting: Meeting, transcript: str) -> str:
     meeting_type = meeting.get_meeting_type_display() if meeting.meeting_type else "Unspecified"
     if meeting.meeting_type == MeetingType.REQUIREMENT_GATHERING:
         return build_requirements_prompt(meeting, transcript, meeting_type)
+    if meeting.meeting_type == MeetingType.PROJECT_MANAGER_NOTES:
+        return build_project_manager_notes_prompt(meeting, transcript, meeting_type)
 
     type_guidance = {
         "requirement_gathering_minutes": (
@@ -145,6 +147,58 @@ Instructions:
 - For action items, include Owner, Task, Due date, and Evidence. Use "Unassigned" or "Not stated" when missing.
 - Tailor the output to this meeting type: {type_guidance}
 - Keep the wording professional and practical.
+
+Transcript:
+{transcript}
+"""
+
+
+def build_project_manager_notes_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
+    return f"""Meeting type: {meeting_type}
+Meeting title: {meeting.title or "Untitled meeting"}
+Started at: {meeting.started_at.isoformat()}
+Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
+
+Instructions:
+- You are generating meeting notes from a transcribed meeting.
+- The transcript may contain transcription mistakes, wrong speaker labels, missing punctuation, repeated phrases, or misheard product and feature names. Deduce the intended meaning when something sounds wrong, but do not invent requirements or decisions that are not supported by the transcript.
+- Write the notes in the same format and level of detail as professional project manager notes.
+- Output only the meeting notes. Do not include an introduction, explanation, Markdown table, action-items section, or summary section unless the meeting itself explicitly had those items.
+- Use plain text, not Markdown.
+
+Use this exact structure:
+
+Meeting Details:
+
+Date: [Use the meeting date if known from metadata or transcript, otherwise "Not specified"]
+Time: [Use the meeting time if known from metadata or transcript, otherwise "Not specified"]
+Location/Platform: [Use the platform if known from the transcript, otherwise "Not specified"]
+Attendees:
+
+[List attendee names, one per line. If attendees are unclear, write "Not specified"]
+
+Discussion Points:
+
+[Group the discussion by product area, feature, flow, screen, role, or topic.]
+
+For each discussion topic:
+- Use short plain headings such as "Academy Admin Flow", "Player Flow", "Video Posts", or "Design & UX Notes".
+- Capture all concrete requirements, decisions, UX notes, edge cases, and clarifications.
+- Preserve hierarchy where needed:
+  - Feature area
+  - Screen or flow inside it
+  - Specific requested changes
+- Use concise lines and bullets.
+- Avoid long paragraphs.
+- Keep wording close to implementation-ready notes, not a conversational recap.
+- Do not over-summarize. Important details must not be lost.
+- Do not write "The team discussed..." unless needed for clarity.
+- Keep product names, screen names, role names, and button labels exactly as intended.
+- Do not include timestamps.
+- Do not include speaker names unless the speaker identity matters to the requirement or decision.
+- If the meeting discusses alternatives and later chooses one, include only the final chosen direction.
+- If something is discussed and later removed, omit it completely.
+- If two points contradict each other, keep the later one and omit the earlier one.
 
 Transcript:
 {transcript}

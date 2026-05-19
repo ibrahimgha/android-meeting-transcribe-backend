@@ -35,6 +35,7 @@ class MeetingType(models.TextChoices):
     )
     FOLLOWUP_MEETING = "followup_meeting", "Followup meeting"
     DRAFT_DELIVERY = "draft_delivery", "Draft delivery"
+    PROJECT_MANAGER_NOTES = "project_manager_notes", "Project manager notes"
 
 
 class MeetingOutputStatus(models.TextChoices):
