@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 import django
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
@@ -71,26 +72,29 @@ mcp = build_server()
 
 
 @mcp.tool()
-def list_meetings(limit: int = 20, status: str = "") -> dict:
+async def list_meetings(limit: int = 20, status: str = "") -> dict:
     """List meetings for the configured MCP user. Optional status: recording, ended, complete, failed."""
-    return mcp_api.list_meetings(limit=limit, status=status)
+    return await sync_to_async(mcp_api.list_meetings, thread_sensitive=True)(
+        limit=limit,
+        status=status,
+    )
 
 
 @mcp.tool()
-def get_meeting(meeting_id: str) -> dict:
+async def get_meeting(meeting_id: str) -> dict:
     """Get meeting metadata, import status, transcript segments, processed messages, and minutes."""
-    return mcp_api.get_meeting(meeting_id)
+    return await sync_to_async(mcp_api.get_meeting, thread_sensitive=True)(meeting_id)
 
 
 @mcp.tool()
-def import_recording_from_url(
+async def import_recording_from_url(
     recording_url: str,
     title: str = "",
     original_filename: str = "",
     process_now: bool = False,
 ) -> dict:
     """Queue a previous PCM WAV recording from an HTTP(S) URL for background segmentation and transcription."""
-    return mcp_api.import_recording_from_url(
+    return await sync_to_async(mcp_api.import_recording_from_url, thread_sensitive=True)(
         recording_url=recording_url,
         title=title,
         original_filename=original_filename,
@@ -99,21 +103,26 @@ def import_recording_from_url(
 
 
 @mcp.tool()
-def process_one_import_job() -> dict:
+async def process_one_import_job() -> dict:
     """Process one pending imported recording immediately. The background worker also does this automatically."""
-    return mcp_api.process_one_import_job()
+    return await sync_to_async(mcp_api.process_one_import_job, thread_sensitive=True)()
 
 
 @mcp.tool()
-def extract_meeting_minutes(meeting_id: str, meeting_type: str) -> dict:
+async def extract_meeting_minutes(meeting_id: str, meeting_type: str) -> dict:
     """Extract minutes or gathered requirements for a completed meeting using one of the configured meeting types."""
-    return mcp_api.extract_meeting_minutes(meeting_id, meeting_type)
+    return await sync_to_async(mcp_api.extract_meeting_minutes, thread_sensitive=True)(
+        meeting_id,
+        meeting_type,
+    )
 
 
 @mcp.tool()
-def rebuild_messages_and_summaries(meeting_id: str) -> dict:
+async def rebuild_messages_and_summaries(meeting_id: str) -> dict:
     """Rebuild grouped display messages, detailed summaries, short summaries, and the meeting title."""
-    return mcp_api.rebuild_messages_and_summaries(meeting_id)
+    return await sync_to_async(mcp_api.rebuild_messages_and_summaries, thread_sensitive=True)(
+        meeting_id
+    )
 
 
 def main() -> None:
