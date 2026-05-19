@@ -1,24 +1,34 @@
 import re
 from io import BytesIO
+from pathlib import Path
 
+from django.conf import settings
 from django.utils import timezone
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .models import Meeting
 
 
-NAVY = colors.HexColor("#07155f")
-RED = colors.HexColor("#f04438")
+BLACK = colors.black
+HEADER_HEIGHT = 68
+BODY_MARGIN_X = 37
+TOP_MARGIN = 91
+BOTTOM_MARGIN = 78
+LOGO_DIR = Path(settings.BASE_DIR) / "meetings" / "static" / "meetings"
+HEADER_LOGO_PATH = LOGO_DIR / "bit68-logo.jpg"
+FOOTER_LOGO_PATH = LOGO_DIR / "bit68-logo-footer.jpg"
 MUTED = colors.HexColor("#5b6475")
 LIGHT_LINE = colors.HexColor("#d9e0ec")
 LIGHT_BG = colors.HexColor("#f7f9fd")
+TITLE_BAND = colors.HexColor("#d9d9d9")
 TEXT = colors.HexColor("#182033")
 
 
@@ -28,10 +38,10 @@ def build_pm_notes_pdf(meeting: Meeting) -> bytes:
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=22 * mm,
-        leftMargin=22 * mm,
-        topMargin=28 * mm,
-        bottomMargin=30 * mm,
+        rightMargin=BODY_MARGIN_X,
+        leftMargin=BODY_MARGIN_X,
+        topMargin=TOP_MARGIN,
+        bottomMargin=BOTTOM_MARGIN,
         title=f"{meeting.title or 'Meeting'} - Project Manager Notes",
         author="Bit68",
     )
@@ -66,11 +76,11 @@ def build_styles() -> dict[str, ParagraphStyle]:
             "PMTitle",
             parent=sample["Title"],
             fontName=bold_font,
-            fontSize=21,
-            leading=26,
-            textColor=NAVY,
-            alignment=TA_LEFT,
-            spaceAfter=8,
+            fontSize=14,
+            leading=17,
+            textColor=BLACK,
+            alignment=TA_CENTER,
+            spaceAfter=0,
         ),
         "subtitle": ParagraphStyle(
             "PMSubtitle",
@@ -87,7 +97,7 @@ def build_styles() -> dict[str, ParagraphStyle]:
             fontName=bold_font,
             fontSize=14,
             leading=18,
-            textColor=NAVY,
+            textColor=BLACK,
             spaceBefore=12,
             spaceAfter=7,
             keepWithNext=True,
@@ -98,7 +108,7 @@ def build_styles() -> dict[str, ParagraphStyle]:
             fontName=bold_font,
             fontSize=11,
             leading=15,
-            textColor=NAVY,
+            textColor=BLACK,
             spaceBefore=8,
             spaceAfter=4,
             keepWithNext=True,
@@ -156,7 +166,8 @@ def build_styles() -> dict[str, ParagraphStyle]:
 
 def build_story(meeting: Meeting, styles: dict[str, ParagraphStyle]) -> list:
     story = [
-        Paragraph("Project Manager Meeting Notes", styles["title"]),
+        build_title_band("Project Manager Meeting Notes", styles),
+        Spacer(1, 14),
         Paragraph(escape_text(meeting.title or "Untitled meeting"), styles["subtitle"]),
     ]
     if not meeting.minutes_text.strip():
@@ -195,6 +206,29 @@ def build_story(meeting: Meeting, styles: dict[str, ParagraphStyle]) -> list:
             story.append(Paragraph(escape_text(stripped), styles["body"]))
 
     return story
+
+
+def build_title_band(title: str, styles: dict[str, ParagraphStyle]) -> Table:
+    table = Table(
+        [[Paragraph(escape_text(title), styles["title"])]],
+        colWidths=[A4[0] - (BODY_MARGIN_X * 2)],
+        rowHeights=[36],
+        hAlign="LEFT",
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), TITLE_BAND),
+                ("BOX", (0, 0), (-1, -1), 0, TITLE_BAND),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 9),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
+    return table
 
 
 def collect_meeting_details(lines: list[str]) -> tuple[list[tuple[str, str]], int]:
@@ -242,36 +276,42 @@ def build_details_table(details: list[tuple[str, str]], styles: dict[str, Paragr
 def draw_page(canvas, doc, meeting: Meeting) -> None:
     width, height = A4
     canvas.saveState()
-    draw_wordmark(canvas, 22 * mm, height - 17 * mm)
-    canvas.setStrokeColor(LIGHT_LINE)
-    canvas.setLineWidth(0.6)
-    canvas.line(22 * mm, height - 24 * mm, width - 22 * mm, height - 24 * mm)
-    canvas.setFont("Helvetica-Bold", 8)
-    canvas.setFillColor(MUTED)
-    canvas.drawRightString(width - 22 * mm, height - 16 * mm, "Project Manager Meeting Notes")
-
-    footer_y = 16 * mm
-    canvas.setStrokeColor(LIGHT_LINE)
-    canvas.line(22 * mm, footer_y + 9 * mm, width - 22 * mm, footer_y + 9 * mm)
-    canvas.setFont("Helvetica", 7.5)
-    canvas.setFillColor(MUTED)
-    canvas.drawString(22 * mm, footer_y, (meeting.title or "Meeting Notes")[:62])
-    canvas.drawCentredString(width / 2, footer_y, f"Page {doc.page}")
-    canvas.drawRightString(width - 22 * mm, footer_y, "www.bit68.com")
-    canvas.drawRightString(
-        width - 22 * mm,
-        footer_y - 9,
-        f"Generated: {timezone.localtime(timezone.now()).strftime('%d/%m/%Y')}",
-    )
+    draw_header(canvas, doc)
+    draw_footer(canvas, meeting)
     canvas.restoreState()
 
 
-def draw_wordmark(canvas, x: float, y: float) -> None:
-    canvas.setFont("Helvetica", 18)
+def draw_header(canvas, doc) -> None:
+    width, height = A4
     canvas.setFillColor(colors.black)
-    canvas.drawString(x, y, "Bit")
-    canvas.setFillColor(RED)
-    canvas.drawString(x + 26, y, "68")
+    canvas.rect(0, height - HEADER_HEIGHT, width, HEADER_HEIGHT, fill=1, stroke=0)
+    draw_logo_image(canvas, HEADER_LOGO_PATH, 34, height - 53, 88, 40)
+
+    canvas.setFillColor(colors.white)
+    canvas.setFont("Helvetica", 10)
+    canvas.drawRightString(width - 32, height - 30, "Project Manager Meeting Notes")
+    canvas.drawRightString(width - 32, height - 45, f"Page {doc.page}")
+
+
+def draw_footer(canvas, meeting: Meeting) -> None:
+    width, _ = A4
+    issued_at = timezone.localtime(timezone.now()).strftime("%d/%m/%Y")
+    meeting_date = timezone.localtime(meeting.started_at).strftime("%d/%m/%Y") if meeting.started_at else issued_at
+
+    draw_logo_image(canvas, FOOTER_LOGO_PATH, 36, 35, 39, 18)
+    canvas.setFont("Helvetica", 7.5)
+    canvas.setFillColor(MUTED)
+    canvas.drawString(36, 20, "www.bit68.com")
+
+    canvas.drawRightString(width - 37, 45, f"Date issued: {issued_at}")
+    canvas.drawRightString(width - 37, 32, f"Meeting date: {meeting_date}")
+    canvas.drawRightString(width - 37, 19, f"Serial Number: {str(meeting.id).split('-')[0].upper()}")
+
+
+def draw_logo_image(canvas, path: Path, x: float, y: float, width: float, height: float) -> None:
+    if not path.exists():
+        return
+    canvas.drawImage(ImageReader(str(path)), x, y, width=width, height=height, preserveAspectRatio=True, mask="auto")
 
 
 def is_bullet(line: str) -> bool:
