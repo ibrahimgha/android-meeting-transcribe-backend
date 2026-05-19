@@ -14,6 +14,7 @@ from rest_framework.test import APITestCase
 
 from .minutes import MinutesResult, build_minutes_prompt, generate_minutes_for_meeting
 from .import_processing import process_next_pending_import
+from . import mcp_api
 from .models import (
     AudioSegment,
     Meeting,
@@ -256,6 +257,64 @@ class MeetingImportQueueTests(TestCase):
         self.assertEqual(segment.transcription_status, SegmentStatus.PENDING)
         self.assertEqual(segment.codec, "wav_pcm16")
         self.assertTrue(segment.audio_file.name.endswith(".wav"))
+
+
+class MeetingMcpApiTests(TestCase):
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.settings_override = override_settings(
+            MEDIA_ROOT=self.temp_dir.name,
+            MCP_DEFAULT_USERNAME="mcp-user",
+            MCP_PUBLIC_URL="https://example.test/mcp",
+        )
+        self.settings_override.enable()
+        self.user = User.objects.create_user(username="mcp-user")
+        self.other_user = User.objects.create_user(username="other-mcp-user")
+
+    def tearDown(self):
+        self.settings_override.disable()
+        self.temp_dir.cleanup()
+
+    def make_meeting(self, user=None, title="MCP meeting") -> Meeting:
+        meeting = Meeting.objects.create(
+            user=user or self.user,
+            title=title,
+            status=MeetingStatus.COMPLETE,
+        )
+        AudioSegment.objects.create(
+            meeting=meeting,
+            user=user or self.user,
+            sequence_number=1,
+            speaker_label="person_1",
+            client_start_ms=0,
+            client_end_ms=1000,
+            transcription_status=SegmentStatus.COMPLETE,
+            transcription_text="Hello from the MCP test.",
+            audio_file=ContentFile(wav_bytes(), name="mcp-segment.wav"),
+            audio_size_bytes=len(wav_bytes()),
+            audio_content_type="audio/wav",
+        )
+        return meeting
+
+    def test_mcp_list_meetings_uses_configured_user(self):
+        own_meeting = self.make_meeting(title="Own MCP meeting")
+        self.make_meeting(user=self.other_user, title="Other MCP meeting")
+
+        payload = mcp_api.list_meetings()
+
+        self.assertEqual(payload["user"], "mcp-user")
+        self.assertEqual(len(payload["meetings"]), 1)
+        self.assertEqual(payload["meetings"][0]["id"], str(own_meeting.id))
+        self.assertEqual(payload["meetings"][0]["title"], "Own MCP meeting")
+
+    def test_mcp_get_meeting_returns_segments_and_absolute_audio_urls(self):
+        meeting = self.make_meeting()
+
+        payload = mcp_api.get_meeting(str(meeting.id))
+
+        self.assertEqual(payload["id"], str(meeting.id))
+        self.assertEqual(payload["segments"][0]["transcription_text"], "Hello from the MCP test.")
+        self.assertTrue(payload["segments"][0]["audio_url"].startswith("https://example.test/media/"))
 
 
 class MeetingMinutesTests(TestCase):

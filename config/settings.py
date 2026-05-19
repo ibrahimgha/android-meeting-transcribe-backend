@@ -142,5 +142,14 @@ MAX_IMPORT_RECORDING_BYTES = int(
     os.environ.get("MAX_IMPORT_RECORDING_BYTES", 500 * 1024 * 1024)
 )
 
+MCP_AUTH_TOKEN = os.environ.get("MCP_AUTH_TOKEN", "")
+MCP_DEFAULT_USERNAME = os.environ.get("MCP_DEFAULT_USERNAME", "")
+MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.environ.get("MCP_PORT", "9121"))
+MCP_PUBLIC_URL = os.environ.get(
+    "MCP_PUBLIC_URL",
+    "http://127.0.0.1:9121/mcp",
+)
+
 LOGIN_REDIRECT_URL = "/meetings/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
