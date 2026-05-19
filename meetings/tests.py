@@ -733,7 +733,7 @@ class MeetingMinutesTests(TestCase):
             "Meeting Details:\n\nDate: 2026-05-19\n\nDiscussion Points:\n\n- Add filters.",
         )
 
-        self.assertIn("Hard maximum: 1,500 words", prompt)
+        self.assertIn("Hard maximum: 1,400 words", prompt)
         self.assertIn("Do not omit any unique requirement", prompt)
         self.assertIn("Merge sibling bullets aggressively", prompt)
         self.assertIn("Keep the exact same top-level structure", prompt)

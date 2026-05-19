@@ -26,7 +26,7 @@ class MinutesResult:
     raw_response: dict[str, Any]
 
 
-PM_NOTES_COMPACT_WORD_LIMIT = 1600
+PM_NOTES_COMPACT_WORD_LIMIT = 1500
 
 
 class OpenAIMinutesClient:
@@ -383,7 +383,7 @@ Rewrite them to match the compact reference style while preserving all product a
 Rules:
 - Output only the rewritten meeting notes.
 - Keep the exact same top-level structure: Meeting Details, Attendees, Discussion Points.
-- Target 800-1,300 words. Hard maximum: 1,500 words.
+- Target 800-1,200 words. Hard maximum: 1,400 words.
 - Do not omit any unique requirement, decision, constraint, edge case, filter, field, role permission, screen/flow change, button, validation rule, risk, or UX/design note.
 - It is allowed and expected to omit who said what, filler, repeated wording, examples that add no new requirement, transcript uncertainty, and unclear fragments that do not resolve to concrete implementation notes.
 - Merge sibling bullets aggressively when they describe the same product area and no information is lost.
