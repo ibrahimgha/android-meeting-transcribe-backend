@@ -1,5 +1,6 @@
-from datetime import timezone as datetime_timezone
+import re
 from dataclasses import dataclass
+from datetime import timezone as datetime_timezone
 from typing import Any
 
 from django.conf import settings
@@ -23,6 +24,9 @@ class MinutesResult:
     text: str
     model: str
     raw_response: dict[str, Any]
+
+
+PM_NOTES_COMPACT_WORD_LIMIT = 1600
 
 
 class OpenAIMinutesClient:
@@ -104,14 +108,36 @@ class OpenAIMinutesClient:
         )
         final_raw = serialize_response(response)
         text = response.choices[0].message.content or ""
+        raw_response = {
+            "chunk_count": len(chunks),
+            "chunk_responses": chunk_responses,
+            "final_response": final_raw,
+            "compacted": False,
+        }
+        if word_count(text) > PM_NOTES_COMPACT_WORD_LIMIT:
+            compact_response = self.client.chat.completions.create(
+                **chat_completion_options(self.model, temperature=0.2),
+                messages=[
+                    {
+                        "role": "system",
+                        "content": minutes_system_prompt(),
+                    },
+                    {
+                        "role": "user",
+                        "content": build_project_manager_compaction_prompt(meeting, text),
+                    },
+                ],
+            )
+            compact_text = (compact_response.choices[0].message.content or "").strip()
+            if compact_text:
+                text = compact_text
+                raw_response["compacted"] = True
+            raw_response["compaction_response"] = serialize_response(compact_response)
+
         return MinutesResult(
             text=text.strip(),
             model=self.model,
-            raw_response={
-                "chunk_count": len(chunks),
-                "chunk_responses": chunk_responses,
-                "final_response": final_raw,
-            },
+            raw_response=raw_response,
         )
 
 
@@ -343,6 +369,34 @@ Extracted chunk notes:
 """
 
 
+def build_project_manager_compaction_prompt(meeting: Meeting, draft_notes: str) -> str:
+    meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
+    return f"""Meeting title: {meeting.title or "Untitled meeting"}
+Metadata date: {meeting_date}
+Metadata time: {meeting_time}
+
+You are given draft project-manager meeting notes that are structurally correct but too long.
+
+Task:
+Rewrite them to match the compact reference style while preserving all product and project-management information.
+
+Rules:
+- Output only the rewritten meeting notes.
+- Keep the exact same top-level structure: Meeting Details, Attendees, Discussion Points.
+- Target 800-1,300 words. Hard maximum: 1,500 words.
+- Do not omit any unique requirement, decision, constraint, edge case, filter, field, role permission, screen/flow change, button, validation rule, risk, or UX/design note.
+- It is allowed and expected to omit who said what, filler, repeated wording, examples that add no new requirement, transcript uncertainty, and unclear fragments that do not resolve to concrete implementation notes.
+- Merge sibling bullets aggressively when they describe the same product area and no information is lost.
+- Prefer compact grouped bullets and nested bullets over long paragraphs.
+- Keep date and time as:
+  - Date: {meeting_date}
+  - Time: {meeting_time}
+
+Draft notes:
+{draft_notes}
+"""
+
+
 def build_project_manager_notes_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
     meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
     return f"""Meeting type: {meeting_type}
@@ -473,6 +527,10 @@ def meeting_datetime_for_prompt(meeting: Meeting) -> tuple[str, str]:
         return "Not specified", "Not specified"
     started_at_utc = started_at.astimezone(datetime_timezone.utc)
     return started_at_utc.strftime("%Y-%m-%d"), started_at_utc.strftime("%H:%M UTC")
+
+
+def word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w']+\b", text or ""))
 
 
 def serialize_response(response) -> dict[str, Any]:

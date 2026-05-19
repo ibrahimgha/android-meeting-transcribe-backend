@@ -20,6 +20,7 @@ from rest_framework.test import APITestCase
 from .minutes import (
     MinutesResult,
     build_minutes_prompt,
+    build_project_manager_compaction_prompt,
     build_project_manager_final_prompt,
     chunk_transcript,
     generate_minutes_for_meeting,
@@ -723,6 +724,19 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Completeness means no unique product", final_prompt)
         self.assertIn("Keep the notes around the same length and density", final_prompt)
         self.assertIn("Reference style and length", final_prompt)
+
+    def test_project_manager_compaction_prompt_preserves_information_with_word_cap(self):
+        meeting = self.make_meeting(title="Long PM meeting")
+
+        prompt = build_project_manager_compaction_prompt(
+            meeting,
+            "Meeting Details:\n\nDate: 2026-05-19\n\nDiscussion Points:\n\n- Add filters.",
+        )
+
+        self.assertIn("Hard maximum: 1,500 words", prompt)
+        self.assertIn("Do not omit any unique requirement", prompt)
+        self.assertIn("Merge sibling bullets aggressively", prompt)
+        self.assertIn("Keep the exact same top-level structure", prompt)
 
     def test_gpt_55_minutes_options_omit_temperature(self):
         self.assertEqual(chat_completion_options("gpt-5.5", temperature=0.2), {"model": "gpt-5.5"})
