@@ -144,6 +144,27 @@ def process_next_pending_import() -> MeetingImport | None:
     if import_job is None:
         return None
 
+    existing_segment_count = existing_import_segment_count(import_job)
+    if existing_segment_count:
+        import_job.status = MeetingImportStatus.COMPLETE
+        import_job.created_segments = existing_segment_count
+        import_job.progress_percent = 100
+        import_job.progress_message = "Segmentation complete; transcription queued"
+        import_job.processed_at = timezone.now()
+        import_job.last_error = ""
+        import_job.save(
+            update_fields=[
+                "status",
+                "created_segments",
+                "progress_percent",
+                "progress_message",
+                "processed_at",
+                "last_error",
+                "updated_at",
+            ],
+        )
+        return import_job
+
     try:
         created_count, duration_ms = process_import_recording(import_job)
         if created_count <= 0:
@@ -189,6 +210,13 @@ def process_next_pending_import() -> MeetingImport | None:
         meeting.save(update_fields=["status", "ended_at", "updated_at"])
 
     return import_job
+
+
+def existing_import_segment_count(import_job: MeetingImport) -> int:
+    return AudioSegment.objects.filter(
+        meeting=import_job.meeting,
+        client_segment_id__startswith=f"import_{import_job.id}_",
+    ).count()
 
 
 def process_import_recording(

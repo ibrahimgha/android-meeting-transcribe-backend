@@ -342,6 +342,37 @@ class MeetingImportQueueTests(TestCase):
         self.assertEqual(claimed.status, MeetingImportStatus.PROCESSING)
         self.assertIsNotNone(claimed.started_at)
 
+    @patch("meetings.import_processing.decode_with_ffmpeg")
+    def test_existing_import_segments_prevent_duplicate_reprocessing(self, decoder):
+        import_job = MeetingImport.objects.create(
+            meeting=self.meeting,
+            user=self.user,
+            source_file=ContentFile(b"fake mp3", name="source.mp3"),
+            original_filename="source.mp3",
+            content_type="audio/mpeg",
+            size_bytes=8,
+        )
+        AudioSegment.objects.create(
+            meeting=self.meeting,
+            user=self.user,
+            client_segment_id=f"import_{import_job.id}_000001",
+            sequence_number=1,
+            speaker_label="person_1",
+            client_start_ms=0,
+            client_end_ms=1000,
+            audio_file=ContentFile(wav_bytes(), name="seg_1.wav"),
+            audio_size_bytes=len(wav_bytes()),
+            audio_content_type="audio/wav",
+        )
+
+        processed = process_next_pending_import()
+
+        self.assertEqual(processed.id, import_job.id)
+        decoder.assert_not_called()
+        import_job.refresh_from_db()
+        self.assertEqual(import_job.status, MeetingImportStatus.COMPLETE)
+        self.assertEqual(import_job.created_segments, 1)
+
 
 class MeetingMcpApiTests(TestCase):
     def setUp(self):
