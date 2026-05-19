@@ -37,19 +37,15 @@ class OpenAIMinutesClient:
         if not transcript.strip():
             raise MinutesInputError("This meeting does not have completed transcriptions yet.")
 
+        if meeting.meeting_type == MeetingType.PROJECT_MANAGER_NOTES:
+            return self.generate_project_manager_notes(meeting, transcript)
+
         response = self.client.chat.completions.create(
             **chat_completion_options(self.model, temperature=0.2),
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "You produce faithful meeting outputs from diarized transcripts. "
-                        "These transcripts came from recorded audio, so some words may be mistranscribed. "
-                        "When a word or phrase makes no sense, infer the intended wording from context "
-                        "only when the correction is reasonably clear. Use only the transcript content. "
-                        "Do not invent facts. If something remains unclear, mark it as unclear. "
-                        "Preserve speaker labels when assigning owners."
-                    ),
+                    "content": minutes_system_prompt(),
                 },
                 {
                     "role": "user",
@@ -60,6 +56,62 @@ class OpenAIMinutesClient:
         raw = serialize_response(response)
         text = response.choices[0].message.content or ""
         return MinutesResult(text=text.strip(), model=self.model, raw_response=raw)
+
+    def generate_project_manager_notes(self, meeting: Meeting, transcript: str) -> MinutesResult:
+        chunks = chunk_transcript(transcript)
+        chunk_notes = []
+        chunk_responses = []
+        for index, chunk in enumerate(chunks, start=1):
+            response = self.client.chat.completions.create(
+                **chat_completion_options(self.model, temperature=0.2),
+                messages=[
+                    {
+                        "role": "system",
+                        "content": minutes_system_prompt(),
+                    },
+                    {
+                        "role": "user",
+                        "content": build_project_manager_chunk_prompt(
+                            meeting,
+                            chunk,
+                            chunk_index=index,
+                            chunk_count=len(chunks),
+                        ),
+                    },
+                ],
+            )
+            chunk_responses.append(serialize_response(response))
+            chunk_notes.append((response.choices[0].message.content or "").strip())
+
+        combined_notes = "\n\n".join(
+            f"Chunk {index} notes:\n{notes}"
+            for index, notes in enumerate(chunk_notes, start=1)
+            if notes
+        )
+        response = self.client.chat.completions.create(
+            **chat_completion_options(self.model, temperature=0.2),
+            messages=[
+                {
+                    "role": "system",
+                    "content": minutes_system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": build_project_manager_final_prompt(meeting, combined_notes),
+                },
+            ],
+        )
+        final_raw = serialize_response(response)
+        text = response.choices[0].message.content or ""
+        return MinutesResult(
+            text=text.strip(),
+            model=self.model,
+            raw_response={
+                "chunk_count": len(chunks),
+                "chunk_responses": chunk_responses,
+                "final_response": final_raw,
+            },
+        )
 
 
 def generate_minutes_for_meeting(
@@ -150,6 +202,105 @@ Instructions:
 
 Transcript:
 {transcript}
+"""
+
+
+def minutes_system_prompt() -> str:
+    return (
+        "You produce faithful meeting outputs from diarized transcripts. "
+        "These transcripts came from recorded audio, so some words may be mistranscribed. "
+        "When a word or phrase makes no sense, infer the intended wording from context "
+        "only when the correction is reasonably clear. Use only the transcript content. "
+        "Do not invent facts. If something remains unclear, mark it as unclear. "
+        "Preserve speaker labels when assigning owners."
+    )
+
+
+def chunk_transcript(transcript: str, *, max_chars: int = 12_000) -> list[str]:
+    lines = transcript.splitlines()
+    chunks = []
+    current = []
+    current_size = 0
+    for line in lines:
+        line_size = len(line) + 1
+        if current and current_size + line_size > max_chars:
+            chunks.append("\n".join(current))
+            current = []
+            current_size = 0
+        current.append(line)
+        current_size += line_size
+    if current:
+        chunks.append("\n".join(current))
+    return chunks or [transcript]
+
+
+def build_project_manager_chunk_prompt(
+    meeting: Meeting,
+    transcript_chunk: str,
+    *,
+    chunk_index: int,
+    chunk_count: int,
+) -> str:
+    return f"""Meeting title: {meeting.title or "Untitled meeting"}
+Transcript chunk: {chunk_index} of {chunk_count}
+
+Task:
+Extract exhaustive raw project-manager notes from this transcript chunk only.
+
+Rules:
+- This is an extraction pass, not a summary pass.
+- Capture every concrete requested change, decision, edge case, role permission, screen/flow change, field, button, validation rule, and UX/design note.
+- Keep small details as separate bullets so they cannot be lost later.
+- Include uncertain or mistranscribed terms when the intended meaning is reasonably clear, and mark unclear wording as unclear.
+- Preserve product names, screen names, role names, labels, and button names as closely as possible.
+- Do not drop details because they seem minor, repeated, already implied, or similar to another point.
+- If a point is later contradicted or removed inside this same chunk, keep only the later/final direction.
+- Use plain topic headings and bullets.
+- If the chunk has no usable meeting-note details, write "No concrete notes in this chunk."
+
+Transcript chunk:
+{transcript_chunk}
+"""
+
+
+def build_project_manager_final_prompt(meeting: Meeting, extracted_chunk_notes: str) -> str:
+    return f"""Meeting title: {meeting.title or "Untitled meeting"}
+Started at: {meeting.started_at.isoformat()}
+Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
+
+You are given exhaustive notes extracted chunk-by-chunk from a full meeting transcript.
+
+Task:
+Consolidate the chunk notes into final project-manager meeting notes.
+
+Critical rules:
+- This is not a summary task.
+- Preserve every distinct concrete detail from the chunk notes.
+- Do not drop details under a summary pretext.
+- Do not merge multiple requested changes into one broad bullet if doing so loses specificity.
+- Remove true duplicates only when the same point is repeated with no new detail.
+- If something is discussed and later removed, omit it completely.
+- If two points contradict each other, keep the later one and omit the earlier one.
+- Output only the final meeting notes.
+- Use plain text, not Markdown.
+
+Use this exact structure:
+
+Meeting Details:
+
+Date: [Use the meeting date if known from metadata or notes, otherwise "Not specified"]
+Time: [Use the meeting time if known from metadata or notes, otherwise "Not specified"]
+Location/Platform: [Use the platform if known from the notes, otherwise "Not specified"]
+Attendees:
+
+[List attendee names, one per line. If attendees are unclear, write "Not specified"]
+
+Discussion Points:
+
+[Group the discussion by product area, feature, flow, screen, role, or topic. Use concise headings and nested bullets.]
+
+Extracted chunk notes:
+{extracted_chunk_notes}
 """
 
 

@@ -17,7 +17,13 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
-from .minutes import MinutesResult, build_minutes_prompt, generate_minutes_for_meeting
+from .minutes import (
+    MinutesResult,
+    build_minutes_prompt,
+    build_project_manager_final_prompt,
+    chunk_transcript,
+    generate_minutes_for_meeting,
+)
 from .import_processing import claim_next_pending_import, process_next_pending_import
 from . import mcp_api
 from .models import (
@@ -695,6 +701,18 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Include every distinct requested change", prompt)
         self.assertIn("Before finalizing, review the transcript again", prompt)
         self.assertIn("If something is discussed and later removed, omit it completely", prompt)
+
+    def test_project_manager_notes_use_chunked_extraction_helpers(self):
+        meeting = self.make_meeting(title="Long PM meeting")
+        transcript = "\n".join(f"[00:{index:02d}] person_1: Detail {index}" for index in range(20))
+
+        chunks = chunk_transcript(transcript, max_chars=120)
+        final_prompt = build_project_manager_final_prompt(meeting, "Chunk 1 notes:\n- Add chat buttons.")
+
+        self.assertGreater(len(chunks), 1)
+        self.assertIn("This is not a summary task", final_prompt)
+        self.assertIn("Do not drop details under a summary pretext", final_prompt)
+        self.assertIn("Preserve every distinct concrete detail", final_prompt)
 
     def test_gpt_55_minutes_options_omit_temperature(self):
         self.assertEqual(chat_completion_options("gpt-5.5", temperature=0.2), {"model": "gpt-5.5"})
