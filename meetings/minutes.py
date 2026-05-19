@@ -281,8 +281,11 @@ Critical rules:
 - This is not a transcript recap and not a conversational summary.
 - The output can omit who said what, filler, repetitions, examples, and discussion wording.
 - The output must not omit information: every distinct requirement, decision, constraint, edge case, filter, field, role permission, screen/flow change, button, validation rule, and UX/design note must appear at least once.
+- Completeness means no unique product or project-management information is lost; it does not mean every utterance, unclear fragment, example, or rephrasing needs its own bullet.
+- Target 800-1,300 words for the final notes. For a very information-dense meeting, you may go up to 1,600 words only if needed to avoid losing information.
 - Keep the notes around the same length and density as the reference format below. Prefer compact, information-rich bullets over long paragraphs.
-- Merge related wording into one bullet only when no information is lost.
+- Merge related wording into one bullet when no information is lost.
+- Omit unclear transcript fragments unless they resolve to a concrete implementation note, decision, risk, or open point.
 - Remove true duplicates only when the same point is repeated with no new detail.
 - If something is discussed and later removed, omit it completely.
 - If two points contradict each other, keep the later one and omit the earlier one.
@@ -358,8 +361,11 @@ Instructions:
 - This is not a transcript recap and not a conversational summary.
 - The output can omit who said what, filler, repetitions, examples, and discussion wording.
 - The output must not omit information: every distinct requested change, decision, constraint, edge case, role permission, screen/flow change, field, button, validation rule, and UX/design note that appears in the transcript must appear at least once.
+- Completeness means no unique product or project-management information is lost; it does not mean every utterance, unclear fragment, example, or rephrasing needs its own bullet.
+- Target 800-1,300 words for the final notes. For a very information-dense meeting, you may go up to 1,600 words only if needed to avoid losing information.
 - Keep the notes around the same length and density as the reference format below. Prefer compact, information-rich bullets over long paragraphs.
-- When several small points belong under the same topic, use nested bullets. Merge related wording only when no information is lost.
+- When several small points belong under the same topic, use nested bullets. Merge related wording when no information is lost.
+- Omit unclear transcript fragments unless they resolve to a concrete implementation note, decision, risk, or open point.
 - Before finalizing, review the transcript again and add any concrete detail that was not already captured.
 
 Use this exact structure:
