@@ -3,6 +3,7 @@ from pathlib import Path
 from django.conf import settings
 from django import forms
 
+from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .models import Meeting, MeetingType
 
 
@@ -20,7 +21,10 @@ class MeetingMinutesForm(forms.ModelForm):
 
 class MeetingImportForm(forms.Form):
     title = forms.CharField(max_length=160, required=False, label="Meeting title")
-    recording_file = forms.FileField(label="Full meeting recording")
+    recording_file = forms.FileField(
+        label="Full meeting recording",
+        widget=forms.FileInput(attrs={"accept": ".wav,.mp3,.m4a,.mp4,audio/*,video/mp4"}),
+    )
 
     def clean_recording_file(self):
         recording_file = self.cleaned_data["recording_file"]
@@ -28,8 +32,8 @@ class MeetingImportForm(forms.Form):
             raise forms.ValidationError("Recording is larger than the configured import limit.")
 
         extension = Path(recording_file.name).suffix.lower().lstrip(".")
-        if extension != "wav":
+        if extension not in SUPPORTED_IMPORT_AUDIO_EXTENSIONS:
             raise forms.ValidationError(
-                "Only WAV recordings are supported for server-side import right now."
+                f"Unsupported recording format. Use one of: {supported_import_audio_message()}."
             )
         return recording_file

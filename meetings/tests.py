@@ -2,6 +2,7 @@ import io
 import json
 import math
 import wave
+from array import array
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -59,6 +60,14 @@ def voiced_wav_bytes(sample_rate=16_000) -> bytes:
                 frames.extend(int(value * 32767).to_bytes(2, "little", signed=True))
         wav_file.writeframes(bytes(frames))
     return output.getvalue()
+
+
+def voiced_samples(sample_rate=16_000) -> array:
+    samples = array("f")
+    for index in range(int(1.5 * sample_rate)):
+        value = 0.24 * math.sin(2.0 * math.pi * 440.0 * index / sample_rate)
+        samples.append(value)
+    return samples
 
 
 class MeetingApiTests(APITestCase):
@@ -175,6 +184,23 @@ class MeetingApiTests(APITestCase):
         self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
         self.assertEqual(meeting.segments.count(), 0)
 
+    def test_import_recording_accepts_mp3_m4a_and_mp4(self):
+        for extension in ["mp3", "m4a", "mp4"]:
+            response = self.client.post(
+                "/api/meetings/import/",
+                {
+                    "title": f"Imported {extension}",
+                    "recording_file": ContentFile(b"fake compressed audio", name=f"workshop.{extension}"),
+                },
+                format="multipart",
+            )
+
+            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+            meeting = Meeting.objects.get(id=response.data["meeting"]["id"])
+            import_job = MeetingImport.objects.get(meeting=meeting)
+            self.assertEqual(import_job.original_filename, f"workshop.{extension}")
+            self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
+
 
 class TranscriptionQueueTests(TestCase):
     def setUp(self):
@@ -258,6 +284,27 @@ class MeetingImportQueueTests(TestCase):
         self.assertEqual(segment.transcription_status, SegmentStatus.PENDING)
         self.assertEqual(segment.codec, "wav_pcm16")
         self.assertTrue(segment.audio_file.name.endswith(".wav"))
+
+    @patch("meetings.import_processing.decode_with_ffmpeg")
+    def test_process_next_pending_import_decodes_compressed_audio(self, decoder):
+        decoder.return_value = (voiced_samples(), 16000)
+        import_job = MeetingImport.objects.create(
+            meeting=self.meeting,
+            user=self.user,
+            source_file=ContentFile(b"fake mp3", name="source.mp3"),
+            original_filename="source.mp3",
+            content_type="audio/mpeg",
+            size_bytes=8,
+        )
+
+        processed = process_next_pending_import()
+
+        self.assertEqual(processed.id, import_job.id)
+        decoder.assert_called_once()
+        import_job.refresh_from_db()
+        self.assertEqual(import_job.status, MeetingImportStatus.COMPLETE)
+        self.assertGreaterEqual(import_job.created_segments, 1)
+        self.assertEqual(self.meeting.segments.count(), import_job.created_segments)
 
 
 class MeetingMcpApiTests(TestCase):
@@ -394,6 +441,23 @@ class MeetingMinutesTests(TestCase):
         self.assertEqual(meeting.user, self.user)
         self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
 
+    def test_web_import_accepts_m4a_upload(self):
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.post(
+            "/meetings/import/",
+            {
+                "title": "Old m4a call",
+                "recording_file": ContentFile(b"fake m4a", name="old-call.m4a"),
+            },
+        )
+
+        meeting = Meeting.objects.get(title="Old m4a call")
+        import_job = MeetingImport.objects.get(meeting=meeting)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(import_job.original_filename, "old-call.m4a")
+        self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
+
     def test_chunked_web_import_assembles_file_and_queues_job(self):
         self.client.login(username=self.user.username, password="strong-password-123")
         payload = voiced_wav_bytes()
@@ -405,8 +469,8 @@ class MeetingMinutesTests(TestCase):
             data=json.dumps(
                 {
                     "title": "Chunked old call",
-                    "filename": "chunked-old-call.wav",
-                    "content_type": "audio/wav",
+                    "filename": "chunked-old-call.mp4",
+                    "content_type": "video/mp4",
                     "total_size": len(payload),
                     "chunk_size": chunk_size,
                     "total_chunks": total_chunks,
@@ -438,7 +502,7 @@ class MeetingMinutesTests(TestCase):
         self.assertEqual(meeting.user, self.user)
         self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
         self.assertEqual(import_job.size_bytes, len(payload))
-        self.assertEqual(import_job.original_filename, "chunked-old-call.wav")
+        self.assertEqual(import_job.original_filename, "chunked-old-call.mp4")
 
     def test_generate_minutes_saves_type_and_calls_extractor(self):
         meeting = self.make_meeting()

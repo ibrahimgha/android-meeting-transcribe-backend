@@ -6,6 +6,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
 from rest_framework import serializers
 
+from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .models import AudioSegment, Meeting, MeetingImport, MeetingStatus
 
 User = get_user_model()
@@ -153,9 +154,9 @@ class MeetingImportCreateSerializer(serializers.Serializer):
             )
 
         extension = Path(value.name).suffix.lower().lstrip(".")
-        if extension != "wav":
+        if extension not in SUPPORTED_IMPORT_AUDIO_EXTENSIONS:
             raise serializers.ValidationError(
-                "Only WAV recordings are supported for server-side import right now."
+                f"Unsupported recording format. Use one of: {supported_import_audio_message()}."
             )
         return value
 

@@ -41,7 +41,7 @@ def build_server() -> FastMCP:
     return FastMCP(
         name="android-meeting-transcribe",
         instructions=(
-            "Use this server to inspect meeting recordings, import previous WAV recordings, "
+            "Use this server to inspect meeting recordings, import previous audio recordings, "
             "check transcription and segmentation status, rebuild message summaries, and extract "
             "meeting minutes for the configured authenticated Django user."
         ),
@@ -93,7 +93,7 @@ async def import_recording_from_url(
     original_filename: str = "",
     process_now: bool = False,
 ) -> dict:
-    """Queue a previous PCM WAV recording from an HTTP(S) URL for background segmentation and transcription."""
+    """Queue a previous WAV, MP3, M4A, or MP4 recording from an HTTP(S) URL for background segmentation and transcription."""
     return await sync_to_async(mcp_api.import_recording_from_url, thread_sensitive=True)(
         recording_url=recording_url,
         title=title,

@@ -16,6 +16,7 @@ from django.views import View
 from django.views.generic import DetailView, ListView
 
 from .forms import MeetingImportForm, MeetingMinutesForm
+from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .minutes import generate_minutes_for_meeting
 from .postprocessing import process_meeting_outputs
 from .models import Meeting, MeetingImport, MeetingStatus
@@ -121,9 +122,10 @@ class StartChunkedImportView(LoginRequiredMixin, View):
         except (TypeError, ValueError):
             return JsonResponse({"detail": "Invalid chunk metadata."}, status=400)
 
-        if Path(filename).suffix.lower() != ".wav":
+        extension = Path(filename).suffix.lower().lstrip(".")
+        if extension not in SUPPORTED_IMPORT_AUDIO_EXTENSIONS:
             return JsonResponse(
-                {"detail": "Only WAV recordings are supported for server-side import right now."},
+                {"detail": f"Unsupported recording format. Use one of: {supported_import_audio_message()}."},
                 status=400,
             )
         if total_size <= 0 or total_size > settings.MAX_IMPORT_RECORDING_BYTES:
@@ -208,7 +210,7 @@ class FinishChunkedImportView(LoginRequiredMixin, View):
         if missing:
             return JsonResponse({"detail": f"Missing chunks: {missing[:10]}"}, status=400)
 
-        source_path = upload_dir(upload_id) / "assembled.wav"
+        source_path = upload_dir(upload_id) / f"assembled{Path(metadata['filename']).suffix.lower()}"
         total_size = 0
         with source_path.open("wb") as assembled:
             for index in range(total_chunks):

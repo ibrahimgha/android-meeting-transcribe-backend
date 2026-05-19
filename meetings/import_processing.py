@@ -1,11 +1,16 @@
 import io
 import math
+import shutil
+import subprocess
+import tempfile
 import wave
 from array import array
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 from sys import byteorder
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
@@ -18,6 +23,7 @@ from .models import (
     MeetingImportStatus,
     MeetingStatus,
 )
+from .import_formats import COMPRESSED_IMPORT_AUDIO_EXTENSIONS, SUPPORTED_IMPORT_AUDIO_EXTENSIONS
 
 
 class MeetingImportProcessingError(ValueError):
@@ -161,8 +167,7 @@ def process_import_recording(
     config: ImportAudioConfig | None = None,
 ) -> tuple[int, int]:
     config = config or ImportAudioConfig()
-    with default_storage.open(import_job.source_file.name, "rb") as source_file:
-        samples, sample_rate = read_wav_samples(source_file)
+    samples, sample_rate = read_import_samples(import_job, config)
 
     if not samples:
         raise MeetingImportProcessingError("The recording is empty.")
@@ -175,6 +180,75 @@ def process_import_recording(
     merged_segments = label_and_merge_segments(ranges, samples, config)
     create_audio_segments(import_job, merged_segments, config.sample_rate)
     return len(merged_segments), duration_ms
+
+
+def read_import_samples(
+    import_job: MeetingImport,
+    config: ImportAudioConfig,
+) -> tuple[list[float], int]:
+    extension = Path(import_job.source_file.name).suffix.lower().lstrip(".")
+    if extension not in SUPPORTED_IMPORT_AUDIO_EXTENSIONS:
+        raise MeetingImportProcessingError(f"Unsupported recording format: {extension or 'unknown'}.")
+
+    if extension in COMPRESSED_IMPORT_AUDIO_EXTENSIONS:
+        return decode_with_ffmpeg(import_job.source_file.name, config)
+
+    with default_storage.open(import_job.source_file.name, "rb") as source_file:
+        return read_wav_samples(source_file)
+
+
+def decode_with_ffmpeg(
+    storage_name: str,
+    config: ImportAudioConfig,
+) -> tuple[list[float], int]:
+    if shutil.which("ffmpeg") is None:
+        raise MeetingImportProcessingError(
+            "ffmpeg is required to import MP3, M4A, and MP4 recordings."
+        )
+
+    source_suffix = Path(storage_name).suffix.lower() or ".audio"
+    with tempfile.TemporaryDirectory(prefix="meeting-import-decode-") as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        source_path = temp_dir / f"source{source_suffix}"
+        decoded_path = temp_dir / "decoded.wav"
+
+        with default_storage.open(storage_name, "rb") as source, source_path.open("wb") as destination:
+            shutil.copyfileobj(source, destination)
+
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(source_path),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(config.sample_rate),
+            "-f",
+            "wav",
+            str(decoded_path),
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=settings.IMPORT_DECODE_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise MeetingImportProcessingError("Timed out while decoding the recording.") from exc
+
+        if result.returncode != 0:
+            error = (result.stderr or "Unknown ffmpeg error.").strip()
+            raise MeetingImportProcessingError(f"Could not decode recording with ffmpeg: {error}")
+
+        with decoded_path.open("rb") as decoded:
+            return read_wav_samples(decoded)
 
 
 def read_wav_samples(source_file) -> tuple[list[float], int]:

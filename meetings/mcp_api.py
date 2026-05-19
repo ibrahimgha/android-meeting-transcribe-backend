@@ -9,6 +9,7 @@ from django.core.files import File
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .import_processing import process_next_pending_import
 from .minutes import generate_minutes_for_meeting
 from .models import Meeting, MeetingImport, MeetingStatus, MeetingType
@@ -75,8 +76,11 @@ def import_recording_from_url(
         raise McpToolError("recording_url must be an http or https URL.")
 
     filename = original_filename.strip() or Path(parsed.path).name or "imported-recording.wav"
-    if Path(filename).suffix.lower() != ".wav":
-        raise McpToolError("Only WAV recordings are supported for imports.")
+    extension = Path(filename).suffix.lower()
+    if extension.lstrip(".") not in SUPPORTED_IMPORT_AUDIO_EXTENSIONS:
+        raise McpToolError(
+            f"Unsupported recording format. Use one of: {supported_import_audio_message()}."
+        )
 
     meeting_title = title.strip() or Path(filename).stem[:160] or "Imported meeting"
     max_bytes = settings.MAX_IMPORT_RECORDING_BYTES
@@ -88,7 +92,7 @@ def import_recording_from_url(
         if declared_length and int(declared_length) > max_bytes:
             raise McpToolError("Recording is larger than the configured import limit.")
 
-        with tempfile.NamedTemporaryFile(suffix=".wav") as temp_file:
+        with tempfile.NamedTemporaryFile(suffix=extension) as temp_file:
             total = 0
             while True:
                 chunk = response.read(1024 * 1024)
