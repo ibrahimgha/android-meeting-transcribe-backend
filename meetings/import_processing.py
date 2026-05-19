@@ -205,25 +205,25 @@ def read_wav_samples(source_file) -> tuple[list[float], int]:
 
 def pcm_to_mono_float(raw: bytes, channels: int, sample_width: int) -> list[float]:
     if sample_width == 1:
-        values = [(byte - 128) / 128.0 for byte in raw]
+        values = array("f", ((byte - 128) / 128.0 for byte in raw))
     elif sample_width == 2:
         pcm = array("h")
         pcm.frombytes(raw)
         if byteorder != "little":
             pcm.byteswap()
-        values = [value / 32768.0 for value in pcm]
+        values = array("f", (value / 32768.0 for value in pcm))
     else:
         pcm = array("i")
         pcm.frombytes(raw)
         if byteorder != "little":
             pcm.byteswap()
-        values = [value / 2147483648.0 for value in pcm]
+        values = array("f", (value / 2147483648.0 for value in pcm))
 
     if channels == 1:
         return values
 
     frame_count = len(values) // channels
-    mono = []
+    mono = array("f")
     for frame_index in range(frame_count):
         start = frame_index * channels
         mono.append(sum(values[start : start + channels]) / channels)
