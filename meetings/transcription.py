@@ -1,5 +1,6 @@
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,7 @@ class OpenAITranscriptionClient:
 
 
 def claim_next_pending_segment() -> AudioSegment | None:
+    requeue_stale_segments()
     with transaction.atomic():
         queryset = AudioSegment.objects.select_related("meeting").filter(
             transcription_status=SegmentStatus.PENDING,
@@ -97,6 +99,24 @@ def claim_next_pending_segment() -> AudioSegment | None:
             ],
         )
         return segment
+
+
+def requeue_stale_segments() -> int:
+    stale_after = getattr(settings, "QUEUE_STALE_AFTER_SECONDS", 30 * 60)
+    if stale_after <= 0:
+        return 0
+
+    cutoff = timezone.now() - timedelta(seconds=stale_after)
+    return AudioSegment.objects.filter(
+        transcription_status=SegmentStatus.PROCESSING,
+        transcribed_at__isnull=True,
+        transcription_started_at__lt=cutoff,
+    ).update(
+        transcription_status=SegmentStatus.PENDING,
+        transcription_started_at=None,
+        last_error="",
+        updated_at=timezone.now(),
+    )
 
 
 def process_next_pending_segment(

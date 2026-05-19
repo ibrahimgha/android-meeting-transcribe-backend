@@ -36,6 +36,35 @@
     <div class="message error">{{ meeting.output_last_error }}</div>
 {% endif %}
 
+<section
+    class="meeting progress-panel"
+    id="meeting-progress"
+    data-progress-url="{% url 'web-meeting-progress' meeting.id %}"
+    data-should-poll="{{ meeting_progress.should_poll|yesno:'true,false' }}"
+>
+    <div class="progress-heading">
+        <h2>Processing progress</h2>
+        <span class="progress-percent" id="meeting-progress-percent">
+            {{ meeting_progress.percent }}%
+        </span>
+    </div>
+    <div
+        class="progress-track"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="{{ meeting_progress.percent }}"
+    >
+        <div
+            class="progress-fill"
+            id="meeting-progress-fill"
+            style="width: {{ meeting_progress.percent }}%;"
+        ></div>
+    </div>
+    <p class="progress-step" id="meeting-progress-message">{{ meeting_progress.message }}</p>
+    <div class="meta" id="meeting-progress-detail">{{ meeting_progress.detail }}</div>
+</section>
+
 {% if meeting.imports.all %}
     <section class="meeting">
         <h2 class="meeting-title">Imported recording</h2>
@@ -43,6 +72,9 @@
             <div class="meta">
                 {{ import_job.original_filename|default:"Uploaded recording" }}
                 · {{ import_job.get_status_display }}
+                {% if import_job.progress_message %}
+                    · {{ import_job.progress_percent }}% · {{ import_job.progress_message }}
+                {% endif %}
                 · {{ import_job.created_segments }} segments created
                 {% if import_job.processed_at %}
                     · Processed {{ import_job.processed_at|date:"Y-m-d H:i" }}
@@ -159,6 +191,57 @@
         No processed messages yet.
     </section>
 {% endif %}
+<script>
+    (function () {
+        const panel = document.getElementById("meeting-progress");
+        if (!panel) {
+            return;
+        }
+
+        const fill = document.getElementById("meeting-progress-fill");
+        const percent = document.getElementById("meeting-progress-percent");
+        const message = document.getElementById("meeting-progress-message");
+        const detail = document.getElementById("meeting-progress-detail");
+        const track = panel.querySelector("[role='progressbar']");
+        let shouldPoll = panel.dataset.shouldPoll === "true";
+        let completedAfterPoll = false;
+
+        function render(payload) {
+            const nextPercent = Math.max(0, Math.min(100, Number(payload.percent || 0)));
+            fill.style.width = `${nextPercent}%`;
+            percent.textContent = `${nextPercent}%`;
+            message.textContent = payload.message || "Processing";
+            detail.textContent = payload.detail || "";
+            track.setAttribute("aria-valuenow", String(nextPercent));
+            shouldPoll = Boolean(payload.should_poll);
+            if (!shouldPoll && completedAfterPoll) {
+                window.location.reload();
+            }
+        }
+
+        async function poll() {
+            if (!shouldPoll) {
+                return;
+            }
+            completedAfterPoll = true;
+            try {
+                const response = await fetch(panel.dataset.progressUrl, {
+                    headers: { "Accept": "application/json" },
+                });
+                if (response.ok) {
+                    render(await response.json());
+                }
+            } catch (error) {
+                return;
+            }
+            if (shouldPoll) {
+                window.setTimeout(poll, 5000);
+            }
+        }
+
+        window.setTimeout(poll, 2000);
+    })();
+</script>
 {% if meeting.minutes_text and meeting.meeting_type == "requirement_gathering" %}
     <script>
         (function () {

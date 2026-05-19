@@ -149,6 +149,8 @@ class MeetingImport(models.Model):
         default=MeetingImportStatus.PENDING,
         db_index=True,
     )
+    progress_percent = models.PositiveSmallIntegerField(default=0)
+    progress_message = models.CharField(max_length=160, blank=True)
     created_segments = models.PositiveIntegerField(default=0)
     started_at = models.DateTimeField(null=True, blank=True)
     processed_at = models.DateTimeField(null=True, blank=True)

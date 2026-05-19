@@ -3,6 +3,7 @@ import json
 import math
 import wave
 from array import array
+from datetime import timedelta
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -10,12 +11,13 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import Client
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from .minutes import MinutesResult, build_minutes_prompt, generate_minutes_for_meeting
-from .import_processing import process_next_pending_import
+from .import_processing import claim_next_pending_import, process_next_pending_import
 from . import mcp_api
 from .models import (
     AudioSegment,
@@ -30,7 +32,7 @@ from .models import (
 )
 from .openai_utils import chat_completion_options
 from .postprocessing import MessageDraft, TextResult, process_meeting_outputs
-from .transcription import TranscriptionResult, process_next_pending_segment
+from .transcription import TranscriptionResult, claim_next_pending_segment, process_next_pending_segment
 
 User = get_user_model()
 
@@ -243,6 +245,20 @@ class TranscriptionQueueTests(TestCase):
     def test_returns_none_when_queue_empty_without_openai_key(self):
         self.assertIsNone(process_next_pending_segment())
 
+    @override_settings(QUEUE_STALE_AFTER_SECONDS=1)
+    def test_requeues_stale_processing_segment(self):
+        segment = self.make_segment(1)
+        segment.transcription_status = SegmentStatus.PROCESSING
+        segment.transcription_started_at = timezone.now() - timedelta(minutes=5)
+        segment.save(update_fields=["transcription_status", "transcription_started_at", "updated_at"])
+
+        claimed = claim_next_pending_segment()
+
+        self.assertEqual(claimed.id, segment.id)
+        claimed.refresh_from_db()
+        self.assertEqual(claimed.transcription_status, SegmentStatus.PROCESSING)
+        self.assertEqual(claimed.transcription_attempts, 1)
+
 
 class MeetingImportQueueTests(TestCase):
     def setUp(self):
@@ -305,6 +321,26 @@ class MeetingImportQueueTests(TestCase):
         self.assertEqual(import_job.status, MeetingImportStatus.COMPLETE)
         self.assertGreaterEqual(import_job.created_segments, 1)
         self.assertEqual(self.meeting.segments.count(), import_job.created_segments)
+
+    @override_settings(QUEUE_STALE_AFTER_SECONDS=1)
+    def test_requeues_stale_processing_import(self):
+        import_job = MeetingImport.objects.create(
+            meeting=self.meeting,
+            user=self.user,
+            source_file=ContentFile(b"fake mp3", name="source.mp3"),
+            original_filename="source.mp3",
+            content_type="audio/mpeg",
+            size_bytes=8,
+            status=MeetingImportStatus.PROCESSING,
+            started_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        claimed = claim_next_pending_import()
+
+        self.assertEqual(claimed.id, import_job.id)
+        claimed.refresh_from_db()
+        self.assertEqual(claimed.status, MeetingImportStatus.PROCESSING)
+        self.assertIsNotNone(claimed.started_at)
 
 
 class MeetingMcpApiTests(TestCase):
@@ -458,6 +494,33 @@ class MeetingMinutesTests(TestCase):
         self.assertEqual(import_job.original_filename, "old-call.m4a")
         self.assertEqual(import_job.status, MeetingImportStatus.PENDING)
 
+    def test_meeting_progress_endpoint_reports_import_step(self):
+        meeting = Meeting.objects.create(
+            user=self.user,
+            title="Long import",
+            status=MeetingStatus.ENDED,
+        )
+        MeetingImport.objects.create(
+            meeting=meeting,
+            user=self.user,
+            source_file=ContentFile(b"fake mp4", name="source.mp4"),
+            original_filename="source.mp4",
+            content_type="video/mp4",
+            size_bytes=8,
+            status=MeetingImportStatus.PROCESSING,
+            progress_percent=40,
+            progress_message="Detecting speech ranges",
+        )
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.get(f"/meetings/{meeting.id}/progress/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["percent"], 40)
+        self.assertEqual(payload["message"], "Detecting speech ranges")
+        self.assertTrue(payload["should_poll"])
+
     def test_chunked_web_import_assembles_file_and_queues_job(self):
         self.client.login(username=self.user.username, password="strong-password-123")
         payload = voiced_wav_bytes()
@@ -587,6 +650,7 @@ class MeetingMinutesTests(TestCase):
         response = self.client.get(f"/meetings/{meeting.id}/")
 
         self.assertContains(response, "Processed meeting")
+        self.assertContains(response, "Processing progress")
         self.assertContains(response, "Extract meeting minutes")
         self.assertContains(response, "Paste in proposal generator")
         self.assertContains(response, "proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/")

@@ -19,7 +19,15 @@ from .forms import MeetingImportForm, MeetingMinutesForm
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .minutes import generate_minutes_for_meeting
 from .postprocessing import process_meeting_outputs
-from .models import Meeting, MeetingImport, MeetingStatus
+from .models import (
+    AudioSegment,
+    Meeting,
+    MeetingImport,
+    MeetingImportStatus,
+    MeetingOutputStatus,
+    MeetingStatus,
+    SegmentStatus,
+)
 
 
 class MeetingListView(LoginRequiredMixin, ListView):
@@ -71,6 +79,7 @@ class MeetingDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["minutes_form"] = MeetingMinutesForm(instance=self.object)
+        context["meeting_progress"] = build_meeting_progress(self.object)
         return context
 
 
@@ -274,6 +283,12 @@ class GenerateMeetingMinutesView(LoginRequiredMixin, View):
         return redirect("web-meeting-detail", pk=meeting.pk)
 
 
+class MeetingProgressView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        meeting = get_object_or_404(Meeting, pk=pk, user=request.user)
+        return JsonResponse(build_meeting_progress(meeting))
+
+
 def upload_dir(upload_id: str) -> Path:
     return Path(settings.MEDIA_ROOT) / "meeting_import_chunks" / upload_id
 
@@ -307,3 +322,144 @@ class GenerateMeetingOutputsView(LoginRequiredMixin, View):
         else:
             messages.success(request, "Messages, summaries, and title rebuilt.")
         return redirect("web-meeting-detail", pk=meeting.pk)
+
+
+def build_meeting_progress(meeting: Meeting) -> dict:
+    imports = list(MeetingImport.objects.filter(meeting=meeting).order_by("created_at"))
+    import_payload = [
+        {
+            "id": str(import_job.id),
+            "filename": import_job.original_filename or "Uploaded recording",
+            "status": import_job.status,
+            "status_label": import_job.get_status_display(),
+            "progress_percent": import_job.progress_percent,
+            "progress_message": import_job.progress_message,
+            "created_segments": import_job.created_segments,
+        }
+        for import_job in imports
+    ]
+
+    segments = AudioSegment.objects.filter(meeting=meeting)
+    segment_total = segments.count()
+    segment_complete = segments.filter(transcription_status=SegmentStatus.COMPLETE).count()
+    segment_processing = segments.filter(transcription_status=SegmentStatus.PROCESSING).count()
+    segment_pending = segments.filter(transcription_status=SegmentStatus.PENDING).count()
+    segment_failed = segments.filter(transcription_status=SegmentStatus.FAILED).count()
+
+    active_import = next(
+        (
+            import_job
+            for import_job in imports
+            if import_job.status in {MeetingImportStatus.PENDING, MeetingImportStatus.PROCESSING}
+        ),
+        None,
+    )
+    if active_import is not None:
+        percent = active_import.progress_percent
+        if active_import.status == MeetingImportStatus.PENDING:
+            message = active_import.progress_message or "Waiting to start import"
+        else:
+            percent = max(percent, 1)
+            message = active_import.progress_message or "Processing uploaded recording"
+        return {
+            "percent": percent,
+            "message": message,
+            "detail": f"{active_import.original_filename or 'Uploaded recording'} · {active_import.get_status_display()}",
+            "should_poll": True,
+            "imports": import_payload,
+            "segments": {
+                "total": segment_total,
+                "complete": segment_complete,
+                "processing": segment_processing,
+                "pending": segment_pending,
+                "failed": segment_failed,
+            },
+        }
+
+    failed_import = next((import_job for import_job in imports if import_job.status == MeetingImportStatus.FAILED), None)
+    if failed_import is not None and segment_total == 0:
+        return {
+            "percent": failed_import.progress_percent,
+            "message": failed_import.progress_message or "Import failed",
+            "detail": failed_import.last_error,
+            "should_poll": False,
+            "imports": import_payload,
+            "segments": {
+                "total": segment_total,
+                "complete": segment_complete,
+                "processing": segment_processing,
+                "pending": segment_pending,
+                "failed": segment_failed,
+            },
+        }
+
+    if segment_total and segment_complete < segment_total:
+        percent = 50 + int((segment_complete / segment_total) * 45)
+        active = segment_complete + segment_processing
+        if segment_processing:
+            message = f"Transcribing segment {active} of {segment_total}"
+        elif segment_pending:
+            message = f"Waiting to transcribe segment {segment_complete + 1} of {segment_total}"
+        else:
+            message = f"Transcribed {segment_complete} of {segment_total} segments"
+        return {
+            "percent": min(98, percent),
+            "message": message,
+            "detail": f"{segment_complete} complete · {segment_pending} pending · {segment_failed} failed",
+            "should_poll": bool(segment_pending or segment_processing),
+            "imports": import_payload,
+            "segments": {
+                "total": segment_total,
+                "complete": segment_complete,
+                "processing": segment_processing,
+                "pending": segment_pending,
+                "failed": segment_failed,
+            },
+        }
+
+    if meeting.output_status in {MeetingOutputStatus.PENDING, MeetingOutputStatus.PROCESSING} and segment_total:
+        return {
+            "percent": 98,
+            "message": "Building messages, summaries, and title",
+            "detail": meeting.get_output_status_display(),
+            "should_poll": True,
+            "imports": import_payload,
+            "segments": {
+                "total": segment_total,
+                "complete": segment_complete,
+                "processing": segment_processing,
+                "pending": segment_pending,
+                "failed": segment_failed,
+            },
+        }
+
+    if meeting.output_status == MeetingOutputStatus.FAILED:
+        return {
+            "percent": 100,
+            "message": "Message processing failed",
+            "detail": meeting.output_last_error,
+            "should_poll": False,
+            "imports": import_payload,
+            "segments": {
+                "total": segment_total,
+                "complete": segment_complete,
+                "processing": segment_processing,
+                "pending": segment_pending,
+                "failed": segment_failed,
+            },
+        }
+
+    return {
+        "percent": 100,
+        "message": "Complete",
+        "detail": f"{segment_complete} transcribed segments",
+        "should_poll": False,
+        "imports": import_payload,
+        "segments": {
+            "total": segment_total,
+            "complete": segment_complete,
+            "processing": segment_processing,
+            "pending": segment_pending,
+            "failed": segment_failed,
+        },
+    }

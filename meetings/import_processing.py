@@ -86,6 +86,7 @@ class SpeakerCluster:
 
 
 def claim_next_pending_import() -> MeetingImport | None:
+    requeue_stale_imports()
     with transaction.atomic():
         queryset = MeetingImport.objects.select_related("meeting", "user").filter(
             status=MeetingImportStatus.PENDING,
@@ -104,15 +105,38 @@ def claim_next_pending_import() -> MeetingImport | None:
         import_job.status = MeetingImportStatus.PROCESSING
         import_job.started_at = timezone.now()
         import_job.last_error = ""
+        import_job.progress_percent = 1
+        import_job.progress_message = "Starting import"
         import_job.save(
             update_fields=[
                 "status",
                 "started_at",
                 "last_error",
+                "progress_percent",
+                "progress_message",
                 "updated_at",
             ],
         )
         return import_job
+
+
+def requeue_stale_imports() -> int:
+    stale_after = getattr(settings, "QUEUE_STALE_AFTER_SECONDS", 30 * 60)
+    if stale_after <= 0:
+        return 0
+
+    cutoff = timezone.now() - timedelta(seconds=stale_after)
+    return MeetingImport.objects.filter(
+        status=MeetingImportStatus.PROCESSING,
+        processed_at__isnull=True,
+        started_at__lt=cutoff,
+    ).update(
+        status=MeetingImportStatus.PENDING,
+        started_at=None,
+        last_error="",
+        progress_message="Requeued after interrupted processing",
+        updated_at=timezone.now(),
+    )
 
 
 def process_next_pending_import() -> MeetingImport | None:
@@ -127,11 +151,13 @@ def process_next_pending_import() -> MeetingImport | None:
     except Exception as exc:
         import_job.status = MeetingImportStatus.FAILED
         import_job.last_error = str(exc)
+        import_job.progress_message = f"Failed: {str(exc)[:140]}"
         import_job.processed_at = timezone.now()
         import_job.save(
             update_fields=[
                 "status",
                 "last_error",
+                "progress_message",
                 "processed_at",
                 "updated_at",
             ],
@@ -142,12 +168,16 @@ def process_next_pending_import() -> MeetingImport | None:
     else:
         import_job.status = MeetingImportStatus.COMPLETE
         import_job.created_segments = created_count
+        import_job.progress_percent = 100
+        import_job.progress_message = "Segmentation complete; transcription queued"
         import_job.processed_at = timezone.now()
         import_job.last_error = ""
         import_job.save(
             update_fields=[
                 "status",
                 "created_segments",
+                "progress_percent",
+                "progress_message",
                 "processed_at",
                 "last_error",
                 "updated_at",
@@ -167,19 +197,36 @@ def process_import_recording(
     config: ImportAudioConfig | None = None,
 ) -> tuple[int, int]:
     config = config or ImportAudioConfig()
+    update_import_progress(import_job, 5, "Reading recording")
     samples, sample_rate = read_import_samples(import_job, config)
 
     if not samples:
         raise MeetingImportProcessingError("The recording is empty.")
 
+    update_import_progress(import_job, 25, "Preparing audio samples")
     if sample_rate != config.sample_rate:
         samples = resample_linear(samples, sample_rate, config.sample_rate)
 
     duration_ms = len(samples) * 1000 // config.sample_rate
+    update_import_progress(import_job, 40, "Detecting speech ranges")
     ranges = segment_samples(samples, config)
+    update_import_progress(import_job, 65, "Identifying speakers and turns")
     merged_segments = label_and_merge_segments(ranges, samples, config)
+    update_import_progress(import_job, 85, "Creating playable segments")
     create_audio_segments(import_job, merged_segments, config.sample_rate)
+    update_import_progress(import_job, 95, "Finalizing import")
     return len(merged_segments), duration_ms
+
+
+def update_import_progress(import_job: MeetingImport, percent: int, message: str) -> None:
+    percent = min(100, max(0, percent))
+    import_job.progress_percent = percent
+    import_job.progress_message = message[:160]
+    MeetingImport.objects.filter(pk=import_job.pk).update(
+        progress_percent=percent,
+        progress_message=message[:160],
+        updated_at=timezone.now(),
+    )
 
 
 def read_import_samples(
@@ -661,8 +708,12 @@ def write_wav_bytes(samples: list[float], sample_rate: int) -> bytes:
 
 class VoiceFingerprintExtractor:
     fft_size = 1024
+    max_fingerprint_samples = 48_000
+    max_spectral_frames = 8
+    max_pitch_frames = 4
 
     def extract(self, samples: list[float], sample_rate: int) -> list[float]:
+        samples = compact_fingerprint_samples(samples, sample_rate, self.max_fingerprint_samples)
         spectral = self.spectral_stats(samples, sample_rate)
         pitch = self.pitch_stats(samples, sample_rate)
         return [
@@ -697,7 +748,10 @@ class VoiceFingerprintExtractor:
             return {"centroid_hz": 0.0, "rolloff_hz": 0.0, "bands": bands}
 
         average_power = [0.0] * ((self.fft_size // 2) + 1)
-        frame_count = min(32, 1 + max((len(samples) - self.fft_size) // self.fft_size, 0))
+        frame_count = min(
+            self.max_spectral_frames,
+            1 + max((len(samples) - self.fft_size) // self.fft_size, 0),
+        )
         step = 0 if frame_count <= 1 else max(1, (len(samples) - self.fft_size) // (frame_count - 1))
 
         for frame_index in range(frame_count):
@@ -747,11 +801,14 @@ class VoiceFingerprintExtractor:
 
         min_lag = sample_rate // 320
         max_lag = sample_rate // 70
-        step = max(frame_size, (len(samples) - frame_size) // 10)
+        step = max(
+            frame_size,
+            (len(samples) - frame_size) // max(1, self.max_pitch_frames - 1),
+        )
         pitches = []
         checked_frames = 0
         start = 0
-        while start + frame_size <= len(samples):
+        while start + frame_size <= len(samples) and checked_frames < self.max_pitch_frames:
             if root_mean_square(samples, start, start + frame_size) >= 0.01:
                 checked_frames += 1
                 pitch = best_pitch(samples, start, frame_size, sample_rate, min_lag, max_lag)
@@ -950,6 +1007,29 @@ def trim_silence(samples: list[float], sample_rate: int) -> list[float]:
     return samples[start:end] if end - start >= frame_size * 2 else samples
 
 
+def compact_fingerprint_samples(
+    samples: list[float],
+    sample_rate: int,
+    max_samples: int,
+) -> list[float]:
+    if len(samples) <= max_samples:
+        return samples
+
+    window_size = max(sample_rate, max_samples // 3)
+    starts = [
+        0,
+        max(0, (len(samples) - window_size) // 2),
+        max(0, len(samples) - window_size),
+    ]
+    compact = array("f")
+    for start in starts:
+        end = min(len(samples), start + window_size)
+        compact.extend(samples[start:end])
+        if len(compact) >= max_samples:
+            break
+    return compact[:max_samples]
+
+
 def centroid(items: list[list[float]]) -> list[float]:
     output = [0.0] * len(items[0])
     for item in items:
@@ -986,12 +1066,14 @@ def best_pitch(
 ) -> float | None:
     best_lag = 0
     best_score = 0.0
-    for lag in range(min_lag, max_lag + 1):
+    lag_step = max(1, (max_lag - min_lag) // 48)
+    sample_stride = 4
+    for lag in range(min_lag, max_lag + 1, lag_step):
         limit = frame_size - lag
         corr = 0.0
         left_energy = 0.0
         right_energy = 0.0
-        for index in range(limit):
+        for index in range(0, limit, sample_stride):
             left = samples[start + index]
             right = samples[start + index + lag]
             corr += left * right
@@ -1031,12 +1113,15 @@ def zero_crossing_rate(samples: list[float]) -> float:
         return 0.0
     crossings = 0
     previous_positive = samples[0] >= 0
-    for sample in samples[1:]:
+    stride = max(1, len(samples) // 8_000)
+    checked = 0
+    for sample in samples[stride::stride]:
         positive = sample >= 0
         if positive != previous_positive:
             crossings += 1
         previous_positive = positive
-    return crossings / (len(samples) - 1)
+        checked += 1
+    return crossings / max(1, checked)
 
 
 def fft(real: list[float], imag: list[float]) -> None:
