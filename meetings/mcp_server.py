@@ -1,5 +1,6 @@
 import hmac
 import os
+from urllib.parse import urlparse
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
@@ -8,6 +9,7 @@ from django.conf import settings
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import TransportSecuritySettings
 
 django.setup()
 
@@ -34,6 +36,7 @@ def build_server() -> FastMCP:
 
     public_url = settings.MCP_PUBLIC_URL
     issuer_url = public_url.rsplit("/mcp", 1)[0] or public_url
+    public_host = urlparse(public_url).netloc
     return FastMCP(
         name="android-meeting-transcribe",
         instructions=(
@@ -51,6 +54,15 @@ def build_server() -> FastMCP:
             issuer_url=issuer_url,
             resource_server_url=public_url,
             required_scopes=["meetings:read", "meetings:write"],
+        ),
+        transport_security=TransportSecuritySettings(
+            allowed_hosts=[
+                public_host,
+                f"{settings.MCP_HOST}:{settings.MCP_PORT}",
+                "localhost",
+                f"localhost:{settings.MCP_PORT}",
+            ],
+            allowed_origins=[issuer_url],
         ),
     )
 
