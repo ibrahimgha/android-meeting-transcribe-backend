@@ -201,7 +201,8 @@ def decode_with_ffmpeg(
     storage_name: str,
     config: ImportAudioConfig,
 ) -> tuple[list[float], int]:
-    if shutil.which("ffmpeg") is None:
+    ffmpeg_binary = resolve_ffmpeg_binary()
+    if ffmpeg_binary is None:
         raise MeetingImportProcessingError(
             "ffmpeg is required to import MP3, M4A, and MP4 recordings."
         )
@@ -216,7 +217,7 @@ def decode_with_ffmpeg(
             shutil.copyfileobj(source, destination)
 
         command = [
-            "ffmpeg",
+            ffmpeg_binary,
             "-hide_banner",
             "-loglevel",
             "error",
@@ -249,6 +250,18 @@ def decode_with_ffmpeg(
 
         with decoded_path.open("rb") as decoded:
             return read_wav_samples(decoded)
+
+
+def resolve_ffmpeg_binary() -> str | None:
+    configured_binary = getattr(settings, "FFMPEG_BINARY", "")
+    if configured_binary:
+        return configured_binary
+
+    runtime_binary = Path(settings.BASE_DIR) / ".runtime" / "bin" / "ffmpeg"
+    if runtime_binary.exists():
+        return str(runtime_binary)
+
+    return shutil.which("ffmpeg")
 
 
 def read_wav_samples(source_file) -> tuple[list[float], int]:
