@@ -165,6 +165,10 @@ Instructions:
 - Write the notes in the same format and level of detail as professional project manager notes.
 - Output only the meeting notes. Do not include an introduction, explanation, Markdown table, action-items section, or summary section unless the meeting itself explicitly had those items.
 - Use plain text, not Markdown.
+- This is not a summary task. Do not shorten the meeting by dropping detailed requested changes.
+- Include every distinct requested change, decision, edge case, role permission, screen/flow change, field, button, validation rule, and UX/design note that appears in the transcript.
+- When several small points belong under the same topic, keep them as separate lines or nested bullets instead of merging them into one broad bullet.
+- Before finalizing, review the transcript again and add any concrete detail that was not already captured.
 
 Use this exact structure:
 
@@ -184,6 +188,7 @@ Discussion Points:
 For each discussion topic:
 - Use short plain headings such as "Academy Admin Flow", "Player Flow", "Video Posts", or "Design & UX Notes".
 - Capture all concrete requirements, decisions, UX notes, edge cases, and clarifications.
+- Preserve exhaustive detail under each topic even when the topic already has a high-level bullet.
 - Preserve hierarchy where needed:
   - Feature area
   - Screen or flow inside it

@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.test import Client
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -343,7 +344,8 @@ class MeetingImportQueueTests(TestCase):
         self.assertIsNotNone(claimed.started_at)
 
     @patch("meetings.import_processing.decode_with_ffmpeg")
-    def test_existing_import_segments_prevent_duplicate_reprocessing(self, decoder):
+    def test_interrupted_import_segments_are_replaced_on_retry(self, decoder):
+        decoder.return_value = (voiced_samples(), 16000)
         import_job = MeetingImport.objects.create(
             meeting=self.meeting,
             user=self.user,
@@ -352,7 +354,10 @@ class MeetingImportQueueTests(TestCase):
             content_type="audio/mpeg",
             size_bytes=8,
         )
-        AudioSegment.objects.create(
+        self.meeting.minutes_text = "Partial notes"
+        self.meeting.output_status = MeetingOutputStatus.COMPLETE
+        self.meeting.save(update_fields=["minutes_text", "output_status", "updated_at"])
+        partial_segment = AudioSegment.objects.create(
             meeting=self.meeting,
             user=self.user,
             client_segment_id=f"import_{import_job.id}_000001",
@@ -364,14 +369,32 @@ class MeetingImportQueueTests(TestCase):
             audio_size_bytes=len(wav_bytes()),
             audio_content_type="audio/wav",
         )
+        MeetingMessage.objects.create(
+            meeting=self.meeting,
+            user=self.user,
+            sequence_number=1,
+            speaker_label="person_1",
+            client_start_ms=0,
+            client_end_ms=1000,
+            transcript_text="Partial transcript.",
+        )
+        partial_audio_name = partial_segment.audio_file.name
 
         processed = process_next_pending_import()
 
         self.assertEqual(processed.id, import_job.id)
-        decoder.assert_not_called()
+        decoder.assert_called_once()
         import_job.refresh_from_db()
+        self.meeting.refresh_from_db()
         self.assertEqual(import_job.status, MeetingImportStatus.COMPLETE)
         self.assertEqual(import_job.created_segments, 1)
+        self.assertEqual(self.meeting.output_status, MeetingOutputStatus.PENDING)
+        self.assertEqual(self.meeting.minutes_text, "")
+        self.assertEqual(self.meeting.messages.count(), 0)
+        self.assertFalse(default_storage.exists(partial_audio_name))
+        segment = self.meeting.segments.get()
+        self.assertNotEqual(segment.id, partial_segment.id)
+        self.assertTrue(segment.client_segment_id.startswith(f"import_{import_job.id}_"))
 
 
 class MeetingMcpApiTests(TestCase):
@@ -668,6 +691,9 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Discussion Points:", prompt)
         self.assertIn("professional project manager notes", prompt)
         self.assertIn("Use plain text, not Markdown", prompt)
+        self.assertIn("This is not a summary task", prompt)
+        self.assertIn("Include every distinct requested change", prompt)
+        self.assertIn("Before finalizing, review the transcript again", prompt)
         self.assertIn("If something is discussed and later removed, omit it completely", prompt)
 
     def test_gpt_55_minutes_options_omit_temperature(self):

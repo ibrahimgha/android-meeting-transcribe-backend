@@ -19,8 +19,10 @@ from django.utils import timezone
 
 from .models import (
     AudioSegment,
+    MeetingMessage,
     MeetingImport,
     MeetingImportStatus,
+    MeetingOutputStatus,
     MeetingStatus,
 )
 from .import_formats import COMPRESSED_IMPORT_AUDIO_EXTENSIONS, SUPPORTED_IMPORT_AUDIO_EXTENSIONS
@@ -144,26 +146,7 @@ def process_next_pending_import() -> MeetingImport | None:
     if import_job is None:
         return None
 
-    existing_segment_count = existing_import_segment_count(import_job)
-    if existing_segment_count:
-        import_job.status = MeetingImportStatus.COMPLETE
-        import_job.created_segments = existing_segment_count
-        import_job.progress_percent = 100
-        import_job.progress_message = "Segmentation complete; transcription queued"
-        import_job.processed_at = timezone.now()
-        import_job.last_error = ""
-        import_job.save(
-            update_fields=[
-                "status",
-                "created_segments",
-                "progress_percent",
-                "progress_message",
-                "processed_at",
-                "last_error",
-                "updated_at",
-            ],
-        )
-        return import_job
+    reset_interrupted_import_outputs(import_job)
 
     try:
         created_count, duration_ms = process_import_recording(import_job)
@@ -212,11 +195,57 @@ def process_next_pending_import() -> MeetingImport | None:
     return import_job
 
 
-def existing_import_segment_count(import_job: MeetingImport) -> int:
-    return AudioSegment.objects.filter(
+def reset_interrupted_import_outputs(import_job: MeetingImport) -> int:
+    partial_segments = AudioSegment.objects.filter(
         meeting=import_job.meeting,
         client_segment_id__startswith=f"import_{import_job.id}_",
-    ).count()
+    )
+    partial_count = partial_segments.count()
+    if partial_count <= 0:
+        return 0
+
+    for segment in partial_segments:
+        if segment.audio_file:
+            default_storage.delete(segment.audio_file.name)
+    partial_segments.delete()
+    MeetingMessage.objects.filter(meeting=import_job.meeting).delete()
+
+    meeting = import_job.meeting
+    meeting.status = MeetingStatus.ENDED
+    meeting.output_status = MeetingOutputStatus.PENDING
+    meeting.output_model = ""
+    meeting.output_response = {}
+    meeting.output_generated_at = None
+    meeting.output_last_error = ""
+    meeting.title_model = ""
+    meeting.title_response = {}
+    meeting.title_generated_at = None
+    meeting.minutes_text = ""
+    meeting.minutes_model = ""
+    meeting.minutes_response = {}
+    meeting.minutes_generated_at = None
+    meeting.minutes_last_error = ""
+    meeting.save(
+        update_fields=[
+            "status",
+            "output_status",
+            "output_model",
+            "output_response",
+            "output_generated_at",
+            "output_last_error",
+            "title_model",
+            "title_response",
+            "title_generated_at",
+            "minutes_text",
+            "minutes_model",
+            "minutes_response",
+            "minutes_generated_at",
+            "minutes_last_error",
+            "updated_at",
+        ],
+    )
+    update_import_progress(import_job, 2, "Restarting interrupted import")
+    return partial_count
 
 
 def process_import_recording(
