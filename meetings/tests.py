@@ -845,6 +845,7 @@ class MeetingMinutesTests(TestCase):
         self.assertContains(response, "Processed meeting")
         self.assertContains(response, "Processing progress")
         self.assertContains(response, "Extract meeting minutes")
+        self.assertNotContains(response, "Rebuild messages and summaries")
         self.assertContains(response, "Paste in proposal generator")
         self.assertContains(response, "proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/")
         self.assertContains(response, 'window.open(destination, "_blank"', html=False)

@@ -99,17 +99,6 @@
         <button type="submit">Extract meeting minutes</button>
     </form>
 
-    <form class="actions" method="post" action="{% url 'web-generate-outputs' meeting.id %}">
-        {% csrf_token %}
-        <button class="secondary" type="submit">Rebuild messages and summaries</button>
-        {% if meeting.output_generated_at %}
-            <span class="meta">
-                Last rebuilt {{ meeting.output_generated_at|date:"Y-m-d H:i" }}
-                {% if meeting.output_model %} · {{ meeting.output_model }}{% endif %}
-            </span>
-        {% endif %}
-    </form>
-
     {% if meeting.minutes_last_error %}
         <div class="message error">{{ meeting.minutes_last_error }}</div>
     {% endif %}
