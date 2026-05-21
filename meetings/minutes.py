@@ -1,13 +1,14 @@
 import re
 from dataclasses import dataclass
-from datetime import timezone as datetime_timezone
+from datetime import timedelta, timezone as datetime_timezone
 from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from openai import OpenAI
 
-from .models import Meeting, MeetingType
+from .models import Meeting, MeetingMinutesStatus, MeetingStatus, MeetingType
 from .openai_utils import chat_completion_options
 
 
@@ -145,18 +146,31 @@ def generate_minutes_for_meeting(
     meeting: Meeting,
     client: OpenAIMinutesClient | None = None,
 ) -> Meeting:
-    client = client or OpenAIMinutesClient()
+    meeting.minutes_status = MeetingMinutesStatus.PROCESSING
+    meeting.minutes_started_at = timezone.now()
+    meeting.minutes_last_error = ""
+    meeting.save(
+        update_fields=[
+            "minutes_status",
+            "minutes_started_at",
+            "minutes_last_error",
+            "updated_at",
+        ],
+    )
     try:
+        client = client or OpenAIMinutesClient()
         result = client.generate(meeting)
     except Exception as exc:
+        meeting.minutes_status = MeetingMinutesStatus.FAILED
         meeting.minutes_last_error = str(exc)
-        meeting.save(update_fields=["minutes_last_error", "updated_at"])
+        meeting.save(update_fields=["minutes_status", "minutes_last_error", "updated_at"])
         raise
 
     meeting.minutes_text = result.text
     meeting.minutes_model = result.model
     meeting.minutes_response = result.raw_response
     meeting.minutes_generated_at = timezone.now()
+    meeting.minutes_status = MeetingMinutesStatus.COMPLETE
     meeting.minutes_last_error = ""
     meeting.save(
         update_fields=[
@@ -164,11 +178,99 @@ def generate_minutes_for_meeting(
             "minutes_model",
             "minutes_response",
             "minutes_generated_at",
+            "minutes_status",
             "minutes_last_error",
             "updated_at",
         ],
     )
     return meeting
+
+
+def queue_minutes_for_meeting(meeting: Meeting) -> Meeting:
+    meeting.minutes_status = MeetingMinutesStatus.PENDING
+    meeting.minutes_requested_at = timezone.now()
+    meeting.minutes_started_at = None
+    meeting.minutes_last_error = ""
+    meeting.minutes_text = ""
+    meeting.minutes_model = ""
+    meeting.minutes_response = {}
+    meeting.minutes_generated_at = None
+    meeting.save(
+        update_fields=[
+            "minutes_status",
+            "minutes_requested_at",
+            "minutes_started_at",
+            "minutes_last_error",
+            "minutes_text",
+            "minutes_model",
+            "minutes_response",
+            "minutes_generated_at",
+            "updated_at",
+        ],
+    )
+    return meeting
+
+
+def claim_next_pending_minutes() -> Meeting | None:
+    requeue_stale_minutes()
+    with transaction.atomic():
+        queryset = Meeting.objects.filter(
+            status=MeetingStatus.COMPLETE,
+            minutes_status=MeetingMinutesStatus.PENDING,
+        ).exclude(meeting_type="")
+        connection_features = transaction.get_connection().features
+        if connection_features.has_select_for_update:
+            if connection_features.has_select_for_update_skip_locked:
+                queryset = queryset.select_for_update(skip_locked=True)
+            else:
+                queryset = queryset.select_for_update()
+
+        meeting = queryset.order_by("minutes_requested_at", "updated_at").first()
+        if meeting is None:
+            return None
+
+        meeting.minutes_status = MeetingMinutesStatus.PROCESSING
+        meeting.minutes_started_at = timezone.now()
+        meeting.minutes_last_error = ""
+        meeting.save(
+            update_fields=[
+                "minutes_status",
+                "minutes_started_at",
+                "minutes_last_error",
+                "updated_at",
+            ],
+        )
+        return meeting
+
+
+def requeue_stale_minutes() -> int:
+    stale_after = getattr(settings, "QUEUE_STALE_AFTER_SECONDS", 30 * 60)
+    if stale_after <= 0:
+        return 0
+
+    cutoff = timezone.now() - timedelta(seconds=stale_after)
+    return Meeting.objects.filter(
+        minutes_status=MeetingMinutesStatus.PROCESSING,
+        minutes_generated_at__isnull=True,
+        minutes_started_at__lt=cutoff,
+    ).update(
+        minutes_status=MeetingMinutesStatus.PENDING,
+        minutes_started_at=None,
+        minutes_last_error="",
+        updated_at=timezone.now(),
+    )
+
+
+def process_next_pending_minutes(
+    client: OpenAIMinutesClient | None = None,
+) -> Meeting | None:
+    meeting = claim_next_pending_minutes()
+    if meeting is None:
+        return None
+    try:
+        return generate_minutes_for_meeting(meeting, client=client)
+    except Exception:
+        return meeting
 
 
 def build_transcript(meeting: Meeting) -> str:

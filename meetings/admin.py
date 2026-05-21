@@ -63,14 +63,18 @@ class MeetingAdmin(admin.ModelAdmin):
         "title",
         "status",
         "meeting_type",
+        "minutes_status",
         "output_status",
         "minutes_generated_at",
         "started_at",
         "ended_at",
     ]
-    list_filter = ["status", "meeting_type", "output_status", "started_at"]
+    list_filter = ["status", "meeting_type", "minutes_status", "output_status", "started_at"]
     search_fields = ["id", "title", "user__username", "user__email"]
     readonly_fields = [
+        "minutes_status",
+        "minutes_requested_at",
+        "minutes_started_at",
         "minutes_generated_at",
         "minutes_model",
         "minutes_last_error",

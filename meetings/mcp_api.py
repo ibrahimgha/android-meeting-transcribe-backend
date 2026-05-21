@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .import_processing import process_next_pending_import
-from .minutes import generate_minutes_for_meeting
+from .minutes import generate_minutes_for_meeting, queue_minutes_for_meeting
 from .models import AudioSegment, Meeting, MeetingImport, MeetingStatus, MeetingType
 from .pdf import build_pm_notes_pdf
 from .postprocessing import process_meeting_outputs
@@ -363,7 +363,7 @@ def upload_audio_segment_from_base64(
     return serialize_segment(segment)
 
 
-def extract_meeting_minutes(meeting_id: str, meeting_type: str) -> dict:
+def extract_meeting_minutes(meeting_id: str, meeting_type: str, *, wait: bool = False) -> dict:
     if meeting_type not in MeetingType.values:
         allowed = ", ".join(MeetingType.values)
         raise McpToolError(f"Unknown meeting_type '{meeting_type}'. Use one of: {allowed}.")
@@ -371,11 +371,15 @@ def extract_meeting_minutes(meeting_id: str, meeting_type: str) -> dict:
     meeting = get_user_meeting(meeting_id)
     meeting.meeting_type = meeting_type
     meeting.save(update_fields=["meeting_type", "updated_at"])
-    generate_minutes_for_meeting(meeting)
+    if wait:
+        generate_minutes_for_meeting(meeting)
+    else:
+        queue_minutes_for_meeting(meeting)
     meeting.refresh_from_db()
     return {
         "meeting": serialize_meeting_summary(meeting),
         "meeting_type": meeting.meeting_type,
+        "minutes_status": meeting.minutes_status,
         "minutes_text": meeting.minutes_text,
         "minutes_model": meeting.minutes_model,
         "minutes_generated_at": meeting.minutes_generated_at.isoformat()
@@ -506,9 +510,17 @@ def serialize_meeting_summary(meeting: Meeting) -> dict:
         "completed_transcription_count": completed_count,
         "message_processing_status": meeting.output_status,
         "meeting_type": meeting.meeting_type,
+        "minutes_status": meeting.minutes_status,
+        "minutes_requested_at": meeting.minutes_requested_at.isoformat()
+        if meeting.minutes_requested_at
+        else None,
+        "minutes_started_at": meeting.minutes_started_at.isoformat()
+        if meeting.minutes_started_at
+        else None,
         "minutes_generated_at": meeting.minutes_generated_at.isoformat()
         if meeting.minutes_generated_at
         else None,
+        "minutes_last_error": meeting.minutes_last_error,
         "imports": import_items,
     }
 

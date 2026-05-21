@@ -96,8 +96,16 @@
             </label>
             {{ minutes_form.meeting_type }}
         </div>
-        <button type="submit">Extract meeting minutes</button>
+        {% if meeting.minutes_status == "pending" or meeting.minutes_status == "processing" %}
+            <button type="submit" disabled>Extracting meeting minutes...</button>
+        {% else %}
+            <button type="submit">Extract meeting minutes</button>
+        {% endif %}
     </form>
+
+    {% if meeting.minutes_status == "pending" or meeting.minutes_status == "processing" %}
+        <div class="meta">Meeting minutes are being extracted in the background.</div>
+    {% endif %}
 
     {% if meeting.minutes_last_error %}
         <div class="message error">{{ meeting.minutes_last_error }}</div>

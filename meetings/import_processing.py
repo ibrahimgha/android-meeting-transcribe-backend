@@ -22,6 +22,7 @@ from .models import (
     MeetingMessage,
     MeetingImport,
     MeetingImportStatus,
+    MeetingMinutesStatus,
     MeetingOutputStatus,
     MeetingStatus,
 )
@@ -225,6 +226,9 @@ def reset_interrupted_import_outputs(import_job: MeetingImport) -> int:
     meeting.minutes_response = {}
     meeting.minutes_generated_at = None
     meeting.minutes_last_error = ""
+    meeting.minutes_status = MeetingMinutesStatus.IDLE
+    meeting.minutes_requested_at = None
+    meeting.minutes_started_at = None
     meeting.save(
         update_fields=[
             "status",
@@ -241,6 +245,9 @@ def reset_interrupted_import_outputs(import_job: MeetingImport) -> int:
             "minutes_response",
             "minutes_generated_at",
             "minutes_last_error",
+            "minutes_status",
+            "minutes_requested_at",
+            "minutes_started_at",
             "updated_at",
         ],
     )

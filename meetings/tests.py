@@ -25,6 +25,8 @@ from .minutes import (
     build_project_manager_final_prompt,
     chunk_transcript,
     generate_minutes_for_meeting,
+    process_next_pending_minutes,
+    queue_minutes_for_meeting,
 )
 from .import_processing import claim_next_pending_import, process_next_pending_import
 from . import mcp_api
@@ -34,6 +36,7 @@ from .models import (
     MeetingImport,
     MeetingImportStatus,
     MeetingMessage,
+    MeetingMinutesStatus,
     MeetingOutputStatus,
     MeetingStatus,
     MeetingType,
@@ -704,20 +707,25 @@ class MeetingMinutesTests(TestCase):
         self.assertEqual(import_job.size_bytes, len(payload))
         self.assertEqual(import_job.original_filename, "chunked-old-call.mp4")
 
-    def test_generate_minutes_saves_type_and_calls_extractor(self):
+    def test_generate_minutes_queues_background_job(self):
         meeting = self.make_meeting()
         self.client.login(username=self.user.username, password="strong-password-123")
 
-        with patch("meetings.web_views.generate_minutes_for_meeting") as extractor:
-            response = self.client.post(
-                f"/meetings/{meeting.id}/minutes/",
-                {"meeting_type": MeetingType.FOLLOWUP_MEETING},
-            )
+        response = self.client.post(
+            f"/meetings/{meeting.id}/minutes/",
+            {"meeting_type": MeetingType.FOLLOWUP_MEETING},
+        )
 
         self.assertEqual(response.status_code, 302)
         meeting.refresh_from_db()
         self.assertEqual(meeting.meeting_type, MeetingType.FOLLOWUP_MEETING)
-        extractor.assert_called_once()
+        self.assertEqual(meeting.minutes_status, MeetingMinutesStatus.PENDING)
+        self.assertEqual(meeting.minutes_text, "")
+        self.assertIsNotNone(meeting.minutes_requested_at)
+
+        detail_response = self.client.get(f"/meetings/{meeting.id}/")
+        self.assertContains(detail_response, "Meeting minutes are being extracted in the background.")
+        self.assertContains(detail_response, "Extracting meeting minutes...", html=False)
 
     def test_generate_minutes_for_meeting_stores_openai_output(self):
         meeting = self.make_meeting()
@@ -730,7 +738,21 @@ class MeetingMinutesTests(TestCase):
         self.assertEqual(meeting.minutes_model, "fake-minutes")
         self.assertEqual(meeting.minutes_response["id"], "fake")
         self.assertEqual(meeting.minutes_last_error, "")
+        self.assertEqual(meeting.minutes_status, MeetingMinutesStatus.COMPLETE)
         self.assertIsNotNone(meeting.minutes_generated_at)
+        self.assertIn("customer portal", fake_client.transcripts[0])
+
+    def test_process_next_pending_minutes_runs_queued_job(self):
+        meeting = self.make_meeting()
+        queue_minutes_for_meeting(meeting)
+        fake_client = FakeMinutesClient()
+
+        processed = process_next_pending_minutes(client=fake_client)
+
+        self.assertEqual(processed.id, meeting.id)
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.minutes_text, "## Summary\n- Clear next step.")
+        self.assertEqual(meeting.minutes_status, MeetingMinutesStatus.COMPLETE)
         self.assertIn("customer portal", fake_client.transcripts[0])
 
     def test_requirement_gathering_prompt_outputs_only_final_requirements(self):

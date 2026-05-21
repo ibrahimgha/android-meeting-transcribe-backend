@@ -45,6 +45,14 @@ class MeetingOutputStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class MeetingMinutesStatus(models.TextChoices):
+    IDLE = "idle", "Idle"
+    PENDING = "pending", "Pending"
+    PROCESSING = "processing", "Processing"
+    COMPLETE = "complete", "Complete"
+    FAILED = "failed", "Failed"
+
+
 def segment_upload_path(instance: "AudioSegment", filename: str) -> str:
     extension = Path(filename).suffix.lower() or ".wav"
     return (
@@ -83,6 +91,14 @@ class Meeting(models.Model):
     minutes_response = models.JSONField(default=dict, blank=True)
     minutes_generated_at = models.DateTimeField(null=True, blank=True)
     minutes_last_error = models.TextField(blank=True)
+    minutes_status = models.CharField(
+        max_length=16,
+        choices=MeetingMinutesStatus.choices,
+        default=MeetingMinutesStatus.IDLE,
+        db_index=True,
+    )
+    minutes_requested_at = models.DateTimeField(null=True, blank=True)
+    minutes_started_at = models.DateTimeField(null=True, blank=True)
     output_status = models.CharField(
         max_length=16,
         choices=MeetingOutputStatus.choices,

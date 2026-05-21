@@ -17,7 +17,7 @@ from django.views.generic import DetailView, ListView
 
 from .forms import MeetingImportForm, MeetingMinutesForm
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
-from .minutes import generate_minutes_for_meeting
+from .minutes import queue_minutes_for_meeting
 from .pdf import build_pm_notes_pdf
 from .postprocessing import process_meeting_outputs
 from .models import (
@@ -25,6 +25,7 @@ from .models import (
     Meeting,
     MeetingImport,
     MeetingImportStatus,
+    MeetingMinutesStatus,
     MeetingOutputStatus,
     MeetingStatus,
     MeetingType,
@@ -274,13 +275,9 @@ class GenerateMeetingMinutesView(LoginRequiredMixin, View):
             messages.error(request, "Choose a meeting type before extracting minutes.")
             return redirect("web-meeting-detail", pk=meeting.pk)
 
-        form.save()
-        try:
-            generate_minutes_for_meeting(meeting)
-        except Exception as exc:
-            messages.error(request, f"Could not extract minutes: {exc}")
-        else:
-            messages.success(request, "Meeting minutes extracted.")
+        meeting = form.save()
+        queue_minutes_for_meeting(meeting)
+        messages.success(request, "Meeting minutes extraction started. This page will update when it is ready.")
 
         return redirect("web-meeting-detail", pk=meeting.pk)
 
@@ -438,6 +435,28 @@ def build_meeting_progress(meeting: Meeting) -> dict:
             },
         }
 
+    if meeting.minutes_status in {MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING}:
+        if meeting.minutes_status == MeetingMinutesStatus.PENDING:
+            message = "Waiting to extract meeting minutes"
+            percent = 98
+        else:
+            message = "Extracting meeting minutes"
+            percent = 99
+        return {
+            "percent": percent,
+            "message": message,
+            "detail": meeting.get_meeting_type_display() or "Meeting minutes",
+            "should_poll": True,
+            "imports": import_payload,
+            "segments": {
+                "total": segment_total,
+                "complete": segment_complete,
+                "processing": segment_processing,
+                "pending": segment_pending,
+                "failed": segment_failed,
+            },
+        }
+
     if meeting.output_status in {MeetingOutputStatus.PENDING, MeetingOutputStatus.PROCESSING} and segment_total:
         return {
             "percent": 98,
@@ -459,6 +478,22 @@ def build_meeting_progress(meeting: Meeting) -> dict:
             "percent": 100,
             "message": "Message processing failed",
             "detail": meeting.output_last_error,
+            "should_poll": False,
+            "imports": import_payload,
+            "segments": {
+                "total": segment_total,
+                "complete": segment_complete,
+                "processing": segment_processing,
+                "pending": segment_pending,
+                "failed": segment_failed,
+            },
+        }
+
+    if meeting.minutes_status == MeetingMinutesStatus.FAILED:
+        return {
+            "percent": 100,
+            "message": "Meeting minutes extraction failed",
+            "detail": meeting.minutes_last_error,
             "should_poll": False,
             "imports": import_payload,
             "segments": {

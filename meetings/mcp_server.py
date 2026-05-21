@@ -232,11 +232,12 @@ async def process_one_transcription_job() -> dict:
 
 
 @mcp.tool()
-async def extract_meeting_minutes(meeting_id: str, meeting_type: str) -> dict:
-    """Extract minutes or gathered requirements for a completed meeting using one of the configured meeting types."""
+async def extract_meeting_minutes(meeting_id: str, meeting_type: str, wait: bool = False) -> dict:
+    """Queue minutes extraction. Set wait=true only when the caller can tolerate a long synchronous OpenAI run."""
     return await sync_to_async(mcp_api.extract_meeting_minutes, thread_sensitive=True)(
         meeting_id,
         meeting_type,
+        wait=wait,
     )
 
 

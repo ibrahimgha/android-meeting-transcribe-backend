@@ -191,6 +191,15 @@ def run_transcription_loop(
                 return processed
             continue
 
+        from .minutes import process_next_pending_minutes
+
+        minutes_job = process_next_pending_minutes()
+        if minutes_job is not None:
+            processed += 1
+            if limit is not None and processed >= limit:
+                return processed
+            continue
+
         if once:
             return processed
         time.sleep(sleep_seconds)
