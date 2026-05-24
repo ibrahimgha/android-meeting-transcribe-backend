@@ -53,6 +53,25 @@ class MeetingMinutesStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class UserWebSettings(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="web_settings",
+    )
+    force_password_change = models.BooleanField(default=True)
+    password_changed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "user web settings"
+        verbose_name_plural = "user web settings"
+
+    def __str__(self) -> str:
+        return f"{self.user} web settings"
+
+
 def segment_upload_path(instance: "AudioSegment", filename: str) -> str:
     extension = Path(filename).suffix.lower() or ".wav"
     return (

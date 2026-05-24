@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AudioSegment, Meeting, MeetingImport, MeetingMessage
+from .models import AudioSegment, Meeting, MeetingImport, MeetingMessage, UserWebSettings
 
 
 class AudioSegmentInline(admin.TabularInline):
@@ -136,3 +136,10 @@ class MeetingImportAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "created_at"]
     search_fields = ["id", "meeting__id", "original_filename", "user__username"]
+
+
+@admin.register(UserWebSettings)
+class UserWebSettingsAdmin(admin.ModelAdmin):
+    list_display = ["user", "force_password_change", "password_changed_at", "updated_at"]
+    list_filter = ["force_password_change", "password_changed_at"]
+    search_fields = ["user__username", "user__email"]

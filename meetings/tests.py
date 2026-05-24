@@ -41,6 +41,7 @@ from .models import (
     MeetingStatus,
     MeetingType,
     SegmentStatus,
+    UserWebSettings,
 )
 from .openai_utils import chat_completion_options
 from .postprocessing import MessageDraft, TextResult, process_meeting_outputs
@@ -553,6 +554,10 @@ class MeetingMinutesTests(TestCase):
             username="web-user",
             password="strong-password-123",
         )
+        UserWebSettings.objects.update_or_create(
+            user=self.user,
+            defaults={"force_password_change": False},
+        )
         self.other_user = User.objects.create_user(username="other-web-user")
         self.client = Client()
 
@@ -587,6 +592,42 @@ class MeetingMinutesTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("/accounts/login/", response["Location"])
+
+    def test_first_web_login_requires_password_change(self):
+        User.objects.create_user(username="first-login", password="temporary-password-123")
+
+        response = self.client.post(
+            "/accounts/login/",
+            {"username": "first-login", "password": "temporary-password-123"},
+        )
+        blocked_response = self.client.get("/meetings/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/force-password-change/", response["Location"])
+        self.assertEqual(blocked_response.status_code, 302)
+        self.assertIn("/accounts/force-password-change/", blocked_response["Location"])
+
+    def test_forced_password_change_clears_first_login_gate(self):
+        user = User.objects.create_user(username="must-change", password="temporary-password-123")
+        self.client.login(username="must-change", password="temporary-password-123")
+
+        response = self.client.post(
+            "/accounts/force-password-change/",
+            {
+                "old_password": "temporary-password-123",
+                "new_password1": "new-Strong-password-456",
+                "new_password2": "new-Strong-password-456",
+            },
+        )
+        user.refresh_from_db()
+        settings = UserWebSettings.objects.get(user=user)
+        meetings_response = self.client.get("/meetings/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(settings.force_password_change)
+        self.assertIsNotNone(settings.password_changed_at)
+        self.assertTrue(user.check_password("new-Strong-password-456"))
+        self.assertEqual(meetings_response.status_code, 200)
 
     def test_web_meetings_show_only_current_users_meetings(self):
         own_meeting = self.make_meeting(title="Own meeting")
