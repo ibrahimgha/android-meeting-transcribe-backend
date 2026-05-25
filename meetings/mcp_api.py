@@ -60,6 +60,7 @@ def list_meeting_types() -> dict:
                 "supports_pdf": value in PM_NOTES_TYPES,
             }
             for value, label in MeetingType.choices
+            if value != MeetingType.LUJY_PM_NOTES
         ]
     }
 

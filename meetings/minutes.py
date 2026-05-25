@@ -69,7 +69,6 @@ class OpenAIMinutesClient:
         chunks = chunk_transcript(transcript)
         chunk_notes = []
         chunk_responses = []
-        is_lujy_notes = meeting.meeting_type == MeetingType.LUJY_PM_NOTES
         for index, chunk in enumerate(chunks, start=1):
             response = self.client.chat.completions.create(
                 **chat_completion_options(self.model, temperature=0.2),
@@ -80,11 +79,7 @@ class OpenAIMinutesClient:
                     },
                     {
                         "role": "user",
-                        "content": (
-                            build_lujy_project_manager_chunk_prompt
-                            if is_lujy_notes
-                            else build_project_manager_chunk_prompt
-                        )(
+                        "content": build_lujy_project_manager_chunk_prompt(
                             meeting,
                             chunk,
                             chunk_index=index,
@@ -110,11 +105,7 @@ class OpenAIMinutesClient:
                 },
                 {
                     "role": "user",
-                    "content": (
-                        build_lujy_project_manager_final_prompt
-                        if is_lujy_notes
-                        else build_project_manager_final_prompt
-                    )(meeting, combined_notes),
+                    "content": build_lujy_project_manager_final_prompt(meeting, combined_notes),
                 },
             ],
         )
@@ -126,8 +117,7 @@ class OpenAIMinutesClient:
             "final_response": final_raw,
             "compacted": False,
         }
-        compact_word_limit = LUJY_PM_NOTES_COMPACT_WORD_LIMIT if is_lujy_notes else PM_NOTES_COMPACT_WORD_LIMIT
-        if word_count(text) > compact_word_limit:
+        if word_count(text) > LUJY_PM_NOTES_COMPACT_WORD_LIMIT:
             compact_response = self.client.chat.completions.create(
                 **chat_completion_options(self.model, temperature=0.2),
                 messages=[
@@ -137,11 +127,7 @@ class OpenAIMinutesClient:
                     },
                     {
                         "role": "user",
-                        "content": (
-                            build_lujy_project_manager_compaction_prompt
-                            if is_lujy_notes
-                            else build_project_manager_compaction_prompt
-                        )(meeting, text),
+                        "content": build_lujy_project_manager_compaction_prompt(meeting, text),
                     },
                 ],
             )
@@ -347,9 +333,7 @@ def build_minutes_prompt(meeting: Meeting, transcript: str) -> str:
     meeting_type = meeting.get_meeting_type_display() if meeting.meeting_type else "Unspecified"
     if meeting.meeting_type == MeetingType.REQUIREMENT_GATHERING:
         return build_requirements_prompt(meeting, transcript, meeting_type)
-    if meeting.meeting_type == MeetingType.PROJECT_MANAGER_NOTES:
-        return build_project_manager_notes_prompt(meeting, transcript, meeting_type)
-    if meeting.meeting_type == MeetingType.LUJY_PM_NOTES:
+    if meeting.meeting_type in PM_NOTES_TYPES:
         return build_lujy_project_manager_notes_prompt(meeting, transcript, meeting_type)
 
     type_guidance = {
@@ -557,15 +541,16 @@ def build_lujy_project_manager_chunk_prompt(
     chunk_index: int,
     chunk_count: int,
 ) -> str:
+    output_name = project_manager_output_name(meeting)
     return f"""Meeting title: {meeting.title or "Untitled meeting"}
 Transcript chunk: {chunk_index} of {chunk_count}
 
 Task:
-Extract normalized source material for the "Lujy PM Notes" output from this transcript chunk only.
+Extract normalized source material for the "{output_name}" output from this transcript chunk only.
 
 Rules:
 - This is not a transcript recap. Do not preserve the conversation flow, back-and-forth, examples, or exact phrasing.
-- Convert the discussion into useful conclusions, decisions, actionable requirements, open points, risks, and implementation notes.
+- Convert the discussion into useful conclusions, decisions, actionable requirements, implementation notes, risks, and open points.
 - Capture only information that affects product scope, implementation, UX, delivery, ownership, risk, or next steps.
 - Capture requested changes, decisions, constraints, edge cases, fields, filters, role permissions, screens, flows, buttons, validation rules, UX notes, risks, and open points.
 - Omit filler, repetition, negotiation wording, explanations of why someone thinks something, and anything that does not change the final project understanding.
@@ -575,7 +560,8 @@ Rules:
 - Do not invent a company name. If attribution is not needed, omit attribution entirely.
 - Include uncertain or mistranscribed terms when the intended meaning is reasonably clear, and mark unclear wording as unclear.
 - If a point is contradicted or removed later inside this same chunk, keep only the later/final direction.
-- Prefer normalized bullets such as "Add...", "Remove...", "The system should...", "Decision:", "Action:", "Open point:", or "Risk:".
+- Prefer normalized bullets such as "Add...", "Remove...", "The system should...", "Decision:", "Action:", "Risk:", or "Open point:".
+- Keep risks and open points identifiable so the final pass can gather them into the final Risks and Open Points sections.
 - Do not write bullets like "Person X said...", "The client discussed...", "They talked about...", or "It was mentioned that..." unless the speaker identity itself creates an action or responsibility.
 - If the chunk has no usable notes, write "No concrete notes in this chunk."
 
@@ -586,6 +572,7 @@ Transcript chunk:
 
 def build_lujy_project_manager_final_prompt(meeting: Meeting, extracted_chunk_notes: str) -> str:
     meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
+    output_name = project_manager_output_name(meeting)
     return f"""Meeting title: {meeting.title or "Untitled meeting"}
 Metadata date: {meeting_date}
 Metadata time: {meeting_time}
@@ -595,7 +582,7 @@ Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
 You are given raw notes extracted from a full meeting transcript.
 
 Task:
-Create "Lujy PM Notes": refined project-manager notes that synthesize the useful conclusions, decisions, actionable requirements, open points, and risks from the meeting.
+Create "{output_name}": refined project-manager notes that synthesize the useful conclusions, decisions, actionable requirements, risks, and open points from the meeting.
 
 Critical rules:
 - Output only the final notes.
@@ -607,7 +594,10 @@ Critical rules:
 - Merge repeated or closely related bullets into one refined bullet whenever they lead to the same conclusion.
 - Omit who said what, filler, repeated wording, examples that add no new requirement, conversational phrasing, and discussion history.
 - Preserve useful final information: requirements, decisions, constraints, edge cases, filters, fields, role permissions, screen or flow changes, buttons, validation rules, risks, UX notes, actions, and open points.
-- Every bullet must be one of these useful outputs: a requirement, decision, action item, open point, risk, constraint, or UX/delivery note.
+- Under Discussion Points, every bullet must be one of these useful outputs: a requirement, decision, action item, constraint, or UX/delivery note.
+- Do not place risks or open points under individual discussion topics.
+- Gather all risks into the final Risks section.
+- Gather all open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups into the final Open Points section.
 - Do not write generic transcript labels such as person_1, person_2, speaker_1, or speaker_2.
 - When attribution matters, use actual company, vendor, client, or team names inferred from the transcript or extracted notes. If the actual company name is not clear, use Client, Bit68, Vendor, Product team, or Not specified as appropriate.
 - Do not invent attendees or company names. If attendees are unclear, write "Not specified".
@@ -631,7 +621,15 @@ Attendees:
 
 Discussion Points:
 
-[Group by product area, feature, flow, screen, role, or topic. Keep each topic in one place.]
+[Group by product area, feature, flow, screen, role, or topic. Keep each topic in one place. Do not include risks or open points here.]
+
+Risks:
+
+[List consolidated risks at the end. If none are clear, write "Not specified".]
+
+Open Points:
+
+[List consolidated open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups at the end. If none are clear, write "Not specified".]
 
 Style reference:
 
@@ -648,6 +646,14 @@ Player Flow
 - Players should choose between joining an academy and joining as a floating user.
 - Floating users should indicate whether they already belong to an academy outside the product and may optionally add the academy name.
 
+Risks:
+
+- Not specified
+
+Open Points:
+
+- Confirm whether parent linking should be handled in this scope or deferred.
+
 Extracted notes:
 {extracted_chunk_notes}
 """
@@ -655,24 +661,28 @@ Extracted notes:
 
 def build_lujy_project_manager_compaction_prompt(meeting: Meeting, draft_notes: str) -> str:
     meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
+    output_name = project_manager_output_name(meeting)
     return f"""Meeting title: {meeting.title or "Untitled meeting"}
 Metadata date: {meeting_date}
 Metadata time: {meeting_time}
 
-You are given draft "Lujy PM Notes" that are too long or too scattered.
+You are given draft "{output_name}" that are too long or too scattered.
 
 Task:
 Rewrite them into compact, grouped, outcome-focused project-manager notes.
 
 Rules:
 - Output only the rewritten notes.
-- Keep the exact same top-level structure: Meeting Details, Attendees, Discussion Points.
+- Keep the exact same top-level structure: Meeting Details, Attendees, Discussion Points, Risks, Open Points.
 - Target 300-650 words. Hard maximum: 850 words.
 - Preserve every useful unique requirement, decision, action item, constraint, edge case, filter, field, role permission, screen or flow change, button, validation rule, risk, UX note, and open point.
 - Group all related requirements under the same topic. Do not repeat the same topic in multiple places.
 - Merge sibling bullets aggressively when no information is lost.
 - Remove transcript-recapping language. The result should read like refined PM conclusions, not like what people said during the meeting.
 - Every bullet must be actionable or decision-oriented. Drop bullets that only describe conversation history.
+- Move all risks to the final Risks section.
+- Move all open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups to the final Open Points section.
+- Do not leave risks or open points under individual discussion topics.
 - Do not output person_1, person_2, speaker_1, or speaker_2. Use real company/team names if clear; otherwise omit attribution or use Client, Bit68, Vendor, Product team, or Not specified.
 - Keep date and time as:
   - Date: {meeting_date}
@@ -683,8 +693,15 @@ Draft notes:
 """
 
 
+def project_manager_output_name(meeting: Meeting) -> str:
+    if meeting.meeting_type == MeetingType.LUJY_PM_NOTES:
+        return "Lujy PM Notes"
+    return "Project Manager Notes"
+
+
 def build_lujy_project_manager_notes_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
     meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
+    output_name = project_manager_output_name(meeting)
     return f"""Meeting type: {meeting_type}
 Meeting title: {meeting.title or "Untitled meeting"}
 Metadata date: {meeting_date}
@@ -693,7 +710,7 @@ Started at: {meeting.started_at.isoformat()}
 Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
 
 Instructions:
-- You are generating "Lujy PM Notes" from a transcribed meeting.
+- You are generating "{output_name}" from a transcribed meeting.
 - The transcript may contain transcription mistakes, wrong speaker labels, missing punctuation, repeated phrases, or misheard product and feature names. Deduce the intended meaning when reasonably clear, but do not invent requirements or decisions.
 - Generate refined PM conclusions, not a transcript-style meeting recap.
 - Be summarized like Requirements Gathering output: concise, grouped by topic, and focused on final useful information.
@@ -703,7 +720,10 @@ Instructions:
 - Target 300-650 words. For a dense meeting, go up to 850 words only if needed.
 - Group all related requirements under the same topic. Do not scatter related items across multiple headings.
 - Merge related bullets when they lead to the same conclusion or action.
-- Every bullet must be outcome-focused: a requirement, decision, action item, open point, risk, constraint, UX note, or delivery note.
+- Under Discussion Points, every bullet must be outcome-focused: a requirement, decision, action item, constraint, UX note, or delivery note.
+- Do not place risks or open points under individual discussion topics.
+- Gather all risks into the final Risks section.
+- Gather all open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups into the final Open Points section.
 - Omit transcript process details: who said what, how the discussion evolved, examples that add no new requirement, repeated clarifications, and negotiation wording.
 - Do not write person_1, person_2, speaker_1, or speaker_2 anywhere.
 - Use actual company, vendor, client, or team names when they can be inferred from the transcript. If the actual name is not clear, use Client, Bit68, Vendor, Product team, or Not specified only when attribution matters.
@@ -729,11 +749,19 @@ Attendees:
 
 Discussion Points:
 
-[Group by product area, feature, flow, screen, role, or topic. Keep each topic in one place.]
+[Group by product area, feature, flow, screen, role, or topic. Keep each topic in one place. Do not include risks or open points here.]
+
+Risks:
+
+[List consolidated risks at the end. If none are clear, write "Not specified".]
+
+Open Points:
+
+[List consolidated open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups at the end. If none are clear, write "Not specified".]
 
 For each discussion topic:
 - Use a short heading.
-- Preserve all useful requirements, decisions, actions, UX notes, risks, edge cases, and open points.
+- Preserve all useful requirements, decisions, actions, UX notes, edge cases, and clarifications.
 - Prefer compact bullets over paragraphs.
 - Keep wording close to implementation-ready notes.
 - Do not include timestamps.

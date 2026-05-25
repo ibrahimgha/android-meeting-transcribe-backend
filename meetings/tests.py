@@ -18,6 +18,7 @@ from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
+from .forms import MeetingMinutesForm
 from .minutes import (
     MinutesResult,
     build_minutes_prompt,
@@ -489,13 +490,9 @@ class MeetingMcpApiTests(TestCase):
             },
             type_payload["meeting_types"],
         )
-        self.assertIn(
-            {
-                "value": MeetingType.LUJY_PM_NOTES,
-                "label": "Lujy PM notes",
-                "supports_pdf": True,
-            },
-            type_payload["meeting_types"],
+        self.assertNotIn(
+            MeetingType.LUJY_PM_NOTES,
+            [item["value"] for item in type_payload["meeting_types"]],
         )
 
     def test_mcp_start_end_and_progress_meeting(self):
@@ -868,11 +865,11 @@ class MeetingMinutesTests(TestCase):
 
     def test_saved_minutes_output_can_be_regenerated_explicitly(self):
         meeting = self.make_meeting()
-        meeting.meeting_type = MeetingType.LUJY_PM_NOTES
+        meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
         meeting.save(update_fields=["meeting_type"])
         MeetingMinutesOutput.objects.create(
             meeting=meeting,
-            meeting_type=MeetingType.LUJY_PM_NOTES,
+            meeting_type=MeetingType.PROJECT_MANAGER_NOTES,
             text="Old transcript-like notes",
             model="fake-minutes",
             status=MeetingMinutesStatus.COMPLETE,
@@ -882,12 +879,12 @@ class MeetingMinutesTests(TestCase):
 
         response = self.client.post(
             f"/meetings/{meeting.id}/minutes/",
-            {"meeting_type": MeetingType.LUJY_PM_NOTES, "force": "1"},
+            {"meeting_type": MeetingType.PROJECT_MANAGER_NOTES, "force": "1"},
         )
 
         output = MeetingMinutesOutput.objects.get(
             meeting=meeting,
-            meeting_type=MeetingType.LUJY_PM_NOTES,
+            meeting_type=MeetingType.PROJECT_MANAGER_NOTES,
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(output.status, MeetingMinutesStatus.PENDING)
@@ -929,37 +926,37 @@ class MeetingMinutesTests(TestCase):
 
         self.assertIn("Use this exact structure:", prompt)
         self.assertIn("Meeting Details:", prompt)
-        self.assertIn("Date: 2026-05-19", prompt)
+        self.assertIn("Date:", prompt)
         self.assertIn("Time:", prompt)
         self.assertIn("Attendees:", prompt)
         self.assertIn("Discussion Points:", prompt)
-        self.assertIn("compact professional project manager notes", prompt)
-        self.assertIn("Use plain text with hyphen bullets", prompt)
-        self.assertIn("This is not a transcript recap", prompt)
-        self.assertIn("must not omit information", prompt)
-        self.assertIn("Target 800-1,300 words", prompt)
-        self.assertIn("Completeness means no unique product", prompt)
-        self.assertIn("Keep the notes around the same length and density", prompt)
-        self.assertIn("Omit unclear transcript fragments", prompt)
-        self.assertIn("Reference style and length", prompt)
-        self.assertIn("Team Player Assignment Flow", prompt)
-        self.assertIn("Before finalizing, review the transcript again", prompt)
+        self.assertIn("Risks:", prompt)
+        self.assertIn("Open Points:", prompt)
+        self.assertIn("Project Manager Notes", prompt)
+        self.assertIn("Generate refined PM conclusions", prompt)
+        self.assertIn("Be summarized like Requirements Gathering output", prompt)
+        self.assertIn("Do not place risks or open points under individual discussion topics", prompt)
+        self.assertIn("Gather all risks into the final Risks section", prompt)
+        self.assertIn("Gather all open questions", prompt)
+        self.assertIn("Target 300-650 words", prompt)
         self.assertIn("If something is discussed and later removed, omit it completely", prompt)
 
     def test_project_manager_notes_use_chunked_extraction_helpers(self):
         meeting = self.make_meeting(title="Long PM meeting")
+        meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
         transcript = "\n".join(f"[00:{index:02d}] person_1: Detail {index}" for index in range(20))
 
         chunks = chunk_transcript(transcript, max_chars=120)
-        final_prompt = build_project_manager_final_prompt(meeting, "Chunk 1 notes:\n- Add chat buttons.")
+        final_prompt = build_lujy_project_manager_final_prompt(meeting, "Chunk 1 notes:\n- Add chat buttons.")
 
         self.assertGreater(len(chunks), 1)
-        self.assertIn("This is not a transcript recap", final_prompt)
-        self.assertIn("must not omit information", final_prompt)
-        self.assertIn("Target 800-1,300 words", final_prompt)
-        self.assertIn("Completeness means no unique product", final_prompt)
-        self.assertIn("Keep the notes around the same length and density", final_prompt)
-        self.assertIn("Reference style and length", final_prompt)
+        self.assertIn("Project Manager Notes", final_prompt)
+        self.assertNotIn("Lujy PM Notes", final_prompt)
+        self.assertIn("structured requirements/conclusions document", final_prompt)
+        self.assertIn("Target 300-650 words", final_prompt)
+        self.assertIn("Risks:", final_prompt)
+        self.assertIn("Open Points:", final_prompt)
+        self.assertIn("Do not place risks or open points under individual discussion topics", final_prompt)
 
     def test_lujy_pm_notes_prompt_uses_compact_grouped_company_guidance(self):
         meeting = self.make_meeting(title="ScoutX planning")
@@ -974,15 +971,18 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Generate refined PM conclusions", prompt)
         self.assertIn("Be summarized like Requirements Gathering output", prompt)
         self.assertIn("Group all related requirements under the same topic", prompt)
-        self.assertIn("Every bullet must be outcome-focused", prompt)
+        self.assertIn("every bullet must be outcome-focused", prompt)
         self.assertIn("Omit transcript process details", prompt)
         self.assertIn("Do not write person_1", prompt)
         self.assertIn("Use actual company", prompt)
         self.assertIn("Target 300-650 words", prompt)
         self.assertIn("Do not write \"said\", \"mentioned\", \"discussed\"", prompt)
+        self.assertIn("Risks:", prompt)
+        self.assertIn("Open Points:", prompt)
 
     def test_lujy_pm_notes_chunked_prompts_group_and_compact(self):
         meeting = self.make_meeting(title="Long Lujy PM meeting")
+        meeting.meeting_type = MeetingType.LUJY_PM_NOTES
 
         final_prompt = build_lujy_project_manager_final_prompt(
             meeting,
@@ -997,10 +997,20 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("structured requirements/conclusions document", final_prompt)
         self.assertIn("useful conclusions, decisions, actionable requirements", final_prompt)
         self.assertIn("Do not scatter related requirements", final_prompt)
+        self.assertIn("Risks:", final_prompt)
+        self.assertIn("Open Points:", final_prompt)
         self.assertIn("person_1", final_prompt)
         self.assertIn("Hard maximum: 850 words", compact_prompt)
         self.assertIn("Remove transcript-recapping language", compact_prompt)
+        self.assertIn("Move all risks to the final Risks section", compact_prompt)
         self.assertIn("Group all related requirements under the same topic", compact_prompt)
+
+    def test_lujy_pm_notes_is_hidden_from_web_dropdown(self):
+        form = MeetingMinutesForm()
+        choice_values = [value for value, _ in form.fields["meeting_type"].choices]
+
+        self.assertIn(MeetingType.PROJECT_MANAGER_NOTES, choice_values)
+        self.assertNotIn(MeetingType.LUJY_PM_NOTES, choice_values)
 
     def test_project_manager_compaction_prompt_preserves_information_with_word_cap(self):
         meeting = self.make_meeting(title="Long PM meeting")

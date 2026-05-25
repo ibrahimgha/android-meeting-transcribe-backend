@@ -9,7 +9,11 @@ from .models import Meeting, MeetingType
 
 class MeetingMinutesForm(forms.ModelForm):
     meeting_type = forms.ChoiceField(
-        choices=MeetingType.choices,
+        choices=[
+            choice
+            for choice in MeetingType.choices
+            if choice[0] != MeetingType.LUJY_PM_NOTES
+        ],
         label="Meeting type",
         widget=forms.Select(attrs={"class": "meeting-type-select"}),
     )
