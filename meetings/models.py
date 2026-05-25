@@ -36,6 +36,7 @@ class MeetingType(models.TextChoices):
     FOLLOWUP_MEETING = "followup_meeting", "Followup meeting"
     DRAFT_DELIVERY = "draft_delivery", "Draft delivery"
     PROJECT_MANAGER_NOTES = "project_manager_notes", "Project manager notes"
+    LUJY_PM_NOTES = "lujy_pm_notes", "Lujy PM notes"
 
 
 class MeetingOutputStatus(models.TextChoices):
@@ -161,6 +162,50 @@ class Meeting(models.Model):
         if self.status != next_status:
             self.status = next_status
             self.save(update_fields=["status", "updated_at"])
+
+
+class MeetingMinutesOutput(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    meeting = models.ForeignKey(
+        Meeting,
+        on_delete=models.CASCADE,
+        related_name="minutes_outputs",
+    )
+    meeting_type = models.CharField(
+        max_length=32,
+        choices=MeetingType.choices,
+    )
+    text = models.TextField(blank=True)
+    model = models.CharField(max_length=80, blank=True)
+    response = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=MeetingMinutesStatus.choices,
+        default=MeetingMinutesStatus.IDLE,
+        db_index=True,
+    )
+    requested_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    generated_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-generated_at", "-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["meeting", "meeting_type"],
+                name="unique_minutes_output_per_meeting_type",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["status", "requested_at"]),
+            models.Index(fields=["meeting", "meeting_type"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.meeting_id} {self.meeting_type}"
 
 
 class MeetingImport(models.Model):

@@ -15,8 +15,8 @@ from django.utils import timezone
 
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .import_processing import process_next_pending_import
-from .minutes import generate_minutes_for_meeting, queue_minutes_for_meeting
-from .models import AudioSegment, Meeting, MeetingImport, MeetingStatus, MeetingType
+from .minutes import PM_NOTES_TYPES, generate_minutes_for_meeting, queue_minutes_for_meeting, sync_meeting_minutes_fields
+from .models import AudioSegment, Meeting, MeetingImport, MeetingMinutesOutput, MeetingMinutesStatus, MeetingStatus, MeetingType
 from .pdf import build_pm_notes_pdf
 from .postprocessing import process_meeting_outputs
 from .transcription import process_next_pending_segment
@@ -57,7 +57,7 @@ def list_meeting_types() -> dict:
             {
                 "value": value,
                 "label": label,
-                "supports_pdf": value == MeetingType.PROJECT_MANAGER_NOTES,
+                "supports_pdf": value in PM_NOTES_TYPES,
             }
             for value, label in MeetingType.choices
         ]
@@ -75,7 +75,7 @@ def list_meetings(*, limit: int = 20, status: str = "") -> dict:
                 filter=Q(segments__transcription_text__gt=""),
             ),
         )
-        .prefetch_related("imports")
+        .prefetch_related("imports", "minutes_outputs")
         .order_by("-started_at")
     )
     if status:
@@ -371,8 +371,14 @@ def extract_meeting_minutes(meeting_id: str, meeting_type: str, *, wait: bool = 
     meeting = get_user_meeting(meeting_id)
     meeting.meeting_type = meeting_type
     meeting.save(update_fields=["meeting_type", "updated_at"])
-    if wait:
-        generate_minutes_for_meeting(meeting)
+    output = MeetingMinutesOutput.objects.filter(meeting=meeting, meeting_type=meeting_type).first()
+    if output and output.status == MeetingMinutesStatus.COMPLETE and output.text.strip() and not wait:
+        sync_meeting_minutes_fields(meeting, output)
+    elif output and output.status in {MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING} and not wait:
+        sync_meeting_minutes_fields(meeting, output)
+    elif wait:
+        output = MeetingMinutesOutput.objects.filter(meeting=meeting, meeting_type=meeting_type).first()
+        generate_minutes_for_meeting(meeting, output=output)
     else:
         queue_minutes_for_meeting(meeting)
     meeting.refresh_from_db()
@@ -388,12 +394,20 @@ def extract_meeting_minutes(meeting_id: str, meeting_type: str, *, wait: bool = 
     }
 
 
-def get_project_manager_notes_pdf(meeting_id: str) -> dict:
+def get_project_manager_notes_pdf(meeting_id: str, meeting_type: str = "") -> dict:
     meeting = get_user_meeting(meeting_id)
-    if meeting.meeting_type != MeetingType.PROJECT_MANAGER_NOTES or not meeting.minutes_text.strip():
-        raise McpToolError("Project manager notes PDF is only available for project_manager_notes meetings with generated minutes.")
+    requested_type = meeting_type or meeting.meeting_type
+    if requested_type not in PM_NOTES_TYPES:
+        raise McpToolError("Project manager notes PDF is only available for PM notes meeting outputs.")
+    output = MeetingMinutesOutput.objects.filter(
+        meeting=meeting,
+        meeting_type=requested_type,
+        status=MeetingMinutesStatus.COMPLETE,
+    ).first()
+    if output is None or not output.text.strip():
+        raise McpToolError("Project manager notes PDF is only available for generated PM notes outputs.")
 
-    pdf_bytes = build_pm_notes_pdf(meeting)
+    pdf_bytes = build_pm_notes_pdf(meeting, minutes_text=output.text)
     filename = f"{safe_filename(meeting.title or 'meeting-notes')}-pm-notes.pdf"
     return {
         "meeting_id": str(meeting.id),
@@ -440,7 +454,7 @@ def get_user_meeting(meeting_id: str) -> Meeting:
     try:
         return (
             Meeting.objects.filter(user=user)
-            .prefetch_related("imports", "segments", "messages__segments")
+            .prefetch_related("imports", "segments", "minutes_outputs", "messages__segments")
             .get(id=meeting_id)
         )
     except Meeting.DoesNotExist as exc:
@@ -521,6 +535,10 @@ def serialize_meeting_summary(meeting: Meeting) -> dict:
         if meeting.minutes_generated_at
         else None,
         "minutes_last_error": meeting.minutes_last_error,
+        "available_minutes_outputs": [
+            serialize_minutes_output(output)
+            for output in meeting.minutes_outputs.all().order_by("meeting_type")
+        ],
         "imports": import_items,
     }
 
@@ -547,6 +565,11 @@ def serialize_meeting_detail(meeting: Meeting) -> dict:
         }
         for message in meeting.messages.all().order_by("sequence_number")
     ]
+    outputs = [
+        serialize_minutes_output(output)
+        for output in meeting.minutes_outputs.all().order_by("meeting_type")
+    ]
+    summary["minutes_outputs"] = outputs
     if meeting.minutes_text:
         summary["minutes"] = {
             "meeting_type": meeting.meeting_type,
@@ -559,6 +582,22 @@ def serialize_meeting_detail(meeting: Meeting) -> dict:
     else:
         summary["minutes"] = None
     return summary
+
+
+def serialize_minutes_output(output: MeetingMinutesOutput) -> dict:
+    return {
+        "id": str(output.id),
+        "meeting_type": output.meeting_type,
+        "meeting_type_label": output.get_meeting_type_display(),
+        "status": output.status,
+        "text": output.text,
+        "model": output.model,
+        "requested_at": output.requested_at.isoformat() if output.requested_at else None,
+        "started_at": output.started_at.isoformat() if output.started_at else None,
+        "generated_at": output.generated_at.isoformat() if output.generated_at else None,
+        "last_error": output.last_error,
+        "supports_pdf": output.meeting_type in PM_NOTES_TYPES,
+    }
 
 
 def serialize_segment(segment: AudioSegment) -> dict:

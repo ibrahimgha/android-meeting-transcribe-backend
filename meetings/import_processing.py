@@ -210,6 +210,7 @@ def reset_interrupted_import_outputs(import_job: MeetingImport) -> int:
             default_storage.delete(segment.audio_file.name)
     partial_segments.delete()
     MeetingMessage.objects.filter(meeting=import_job.meeting).delete()
+    import_job.meeting.minutes_outputs.all().delete()
 
     meeting = import_job.meeting
     meeting.status = MeetingStatus.ENDED

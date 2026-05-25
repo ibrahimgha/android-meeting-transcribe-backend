@@ -17,7 +17,7 @@ from django.views.generic import DetailView, ListView
 
 from .forms import MeetingImportForm, MeetingMinutesForm
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
-from .minutes import queue_minutes_for_meeting
+from .minutes import PM_NOTES_TYPES, queue_minutes_for_meeting, sync_meeting_minutes_fields
 from .pdf import build_pm_notes_pdf
 from .postprocessing import process_meeting_outputs
 from .models import (
@@ -25,6 +25,7 @@ from .models import (
     Meeting,
     MeetingImport,
     MeetingImportStatus,
+    MeetingMinutesOutput,
     MeetingMinutesStatus,
     MeetingOutputStatus,
     MeetingStatus,
@@ -75,13 +76,33 @@ class MeetingDetailView(LoginRequiredMixin, DetailView):
             .prefetch_related(
                 "segments",
                 "imports",
+                "minutes_outputs",
                 "messages__segments",
             )
         )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["minutes_form"] = MeetingMinutesForm(instance=self.object)
+        selected_output = selected_minutes_output(self.object, self.request.GET.get("minutes_type", ""))
+        selected_type = (
+            selected_output.meeting_type
+            if selected_output is not None
+            else self.object.meeting_type
+        )
+        context["minutes_form"] = MeetingMinutesForm(
+            instance=self.object,
+            initial={"meeting_type": selected_type},
+        )
+        context["selected_minutes_output"] = selected_output
+        context["selected_minutes_status"] = (
+            selected_output.status
+            if selected_output is not None
+            else MeetingMinutesStatus.IDLE
+        )
+        context["saved_minutes_outputs"] = self.object.minutes_outputs.exclude(
+            status=MeetingMinutesStatus.IDLE,
+        ).order_by("meeting_type")
+        context["pm_notes_types"] = list(PM_NOTES_TYPES)
         context["meeting_progress"] = build_meeting_progress(self.object)
         return context
 
@@ -276,19 +297,38 @@ class GenerateMeetingMinutesView(LoginRequiredMixin, View):
             return redirect("web-meeting-detail", pk=meeting.pk)
 
         meeting = form.save()
-        queue_minutes_for_meeting(meeting)
-        messages.success(request, "Meeting minutes extraction started. This page will update when it is ready.")
+        output = MeetingMinutesOutput.objects.filter(
+            meeting=meeting,
+            meeting_type=meeting.meeting_type,
+        ).first()
+        if output and output.status == MeetingMinutesStatus.COMPLETE and output.text.strip():
+            sync_meeting_minutes_fields(meeting, output)
+            messages.success(request, "Loaded the saved meeting output.")
+        elif output and output.status in {MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING}:
+            sync_meeting_minutes_fields(meeting, output)
+            messages.info(request, "This meeting output is already being extracted.")
+        else:
+            queue_minutes_for_meeting(meeting)
+            messages.success(request, "Meeting minutes extraction started. This page will update when it is ready.")
 
-        return redirect("web-meeting-detail", pk=meeting.pk)
+        return redirect(f"{reverse('web-meeting-detail', kwargs={'pk': meeting.pk})}?minutes_type={meeting.meeting_type}")
 
 
 class MeetingMinutesPdfView(LoginRequiredMixin, View):
     def get(self, request, pk):
         meeting = get_object_or_404(Meeting, pk=pk, user=request.user)
-        if meeting.meeting_type != MeetingType.PROJECT_MANAGER_NOTES or not meeting.minutes_text.strip():
+        requested_type = request.GET.get("minutes_type") or meeting.meeting_type
+        if requested_type not in PM_NOTES_TYPES:
+            raise Http404("Project manager notes PDF is not available for this meeting.")
+        output = MeetingMinutesOutput.objects.filter(
+            meeting=meeting,
+            meeting_type=requested_type,
+            status=MeetingMinutesStatus.COMPLETE,
+        ).first()
+        if output is None or not output.text.strip():
             raise Http404("Project manager notes PDF is not available for this meeting.")
 
-        pdf_bytes = build_pm_notes_pdf(meeting)
+        pdf_bytes = build_pm_notes_pdf(meeting, minutes_text=output.text)
         filename = f"{safe_filename(meeting.title or 'meeting-notes')}-pm-notes.pdf"
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -435,8 +475,12 @@ def build_meeting_progress(meeting: Meeting) -> dict:
             },
         }
 
-    if meeting.minutes_status in {MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING}:
-        if meeting.minutes_status == MeetingMinutesStatus.PENDING:
+    active_minutes = MeetingMinutesOutput.objects.filter(
+        meeting=meeting,
+        status__in=[MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING],
+    ).order_by("requested_at", "updated_at").first()
+    if active_minutes is not None:
+        if active_minutes.status == MeetingMinutesStatus.PENDING:
             message = "Waiting to extract meeting minutes"
             percent = 98
         else:
@@ -445,7 +489,7 @@ def build_meeting_progress(meeting: Meeting) -> dict:
         return {
             "percent": percent,
             "message": message,
-            "detail": meeting.get_meeting_type_display() or "Meeting minutes",
+            "detail": active_minutes.get_meeting_type_display() or "Meeting minutes",
             "should_poll": True,
             "imports": import_payload,
             "segments": {
@@ -519,3 +563,24 @@ def build_meeting_progress(meeting: Meeting) -> dict:
             "failed": segment_failed,
         },
     }
+
+
+def selected_minutes_output(meeting: Meeting, requested_type: str = "") -> MeetingMinutesOutput | None:
+    outputs = {
+        output.meeting_type: output
+        for output in meeting.minutes_outputs.all()
+    }
+    if requested_type in MeetingType.values:
+        return outputs.get(requested_type)
+    if meeting.meeting_type in outputs:
+        return outputs[meeting.meeting_type]
+    completed_outputs = [
+        output
+        for output in outputs.values()
+        if output.status == MeetingMinutesStatus.COMPLETE and output.text.strip()
+    ]
+    return sorted(
+        completed_outputs,
+        key=lambda output: output.generated_at or output.updated_at,
+        reverse=True,
+    )[0] if completed_outputs else None

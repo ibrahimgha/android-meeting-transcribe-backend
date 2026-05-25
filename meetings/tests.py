@@ -21,6 +21,8 @@ from rest_framework.test import APITestCase
 from .minutes import (
     MinutesResult,
     build_minutes_prompt,
+    build_lujy_project_manager_compaction_prompt,
+    build_lujy_project_manager_final_prompt,
     build_project_manager_compaction_prompt,
     build_project_manager_final_prompt,
     chunk_transcript,
@@ -36,6 +38,7 @@ from .models import (
     MeetingImport,
     MeetingImportStatus,
     MeetingMessage,
+    MeetingMinutesOutput,
     MeetingMinutesStatus,
     MeetingOutputStatus,
     MeetingStatus,
@@ -369,6 +372,12 @@ class MeetingImportQueueTests(TestCase):
         self.meeting.minutes_text = "Partial notes"
         self.meeting.output_status = MeetingOutputStatus.COMPLETE
         self.meeting.save(update_fields=["minutes_text", "output_status", "updated_at"])
+        MeetingMinutesOutput.objects.create(
+            meeting=self.meeting,
+            meeting_type=MeetingType.PROJECT_MANAGER_NOTES,
+            text="Partial notes",
+            status=MeetingMinutesStatus.COMPLETE,
+        )
         partial_segment = AudioSegment.objects.create(
             meeting=self.meeting,
             user=self.user,
@@ -402,6 +411,7 @@ class MeetingImportQueueTests(TestCase):
         self.assertEqual(import_job.created_segments, 1)
         self.assertEqual(self.meeting.output_status, MeetingOutputStatus.PENDING)
         self.assertEqual(self.meeting.minutes_text, "")
+        self.assertEqual(self.meeting.minutes_outputs.count(), 0)
         self.assertEqual(self.meeting.messages.count(), 0)
         self.assertFalse(default_storage.exists(partial_audio_name))
         segment = self.meeting.segments.get()
@@ -479,6 +489,14 @@ class MeetingMcpApiTests(TestCase):
             },
             type_payload["meeting_types"],
         )
+        self.assertIn(
+            {
+                "value": MeetingType.LUJY_PM_NOTES,
+                "label": "Lujy PM notes",
+                "supports_pdf": True,
+            },
+            type_payload["meeting_types"],
+        )
 
     def test_mcp_start_end_and_progress_meeting(self):
         started = mcp_api.start_meeting(title="Agent-created meeting")
@@ -533,6 +551,13 @@ class MeetingMcpApiTests(TestCase):
             "Discussion Points:\n\nTopic\n\n- Keep all details."
         )
         meeting.save(update_fields=["meeting_type", "minutes_text"])
+        MeetingMinutesOutput.objects.create(
+            meeting=meeting,
+            meeting_type=MeetingType.PROJECT_MANAGER_NOTES,
+            text=meeting.minutes_text,
+            status=MeetingMinutesStatus.COMPLETE,
+            generated_at=timezone.now(),
+        )
 
         payload = mcp_api.get_project_manager_notes_pdf(str(meeting.id))
         pdf_bytes = base64.b64decode(payload["content_base64"])
@@ -796,6 +821,50 @@ class MeetingMinutesTests(TestCase):
         self.assertEqual(meeting.minutes_status, MeetingMinutesStatus.COMPLETE)
         self.assertIn("customer portal", fake_client.transcripts[0])
 
+    def test_minutes_outputs_are_preserved_per_meeting_type(self):
+        meeting = self.make_meeting()
+        meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
+        meeting.save(update_fields=["meeting_type"])
+        MeetingMinutesOutput.objects.create(
+            meeting=meeting,
+            meeting_type=MeetingType.PROJECT_MANAGER_NOTES,
+            text="Saved PM notes",
+            model="fake-minutes",
+            status=MeetingMinutesStatus.COMPLETE,
+            generated_at=timezone.now(),
+        )
+        MeetingMinutesOutput.objects.create(
+            meeting=meeting,
+            meeting_type=MeetingType.REQUIREMENT_GATHERING,
+            text="- Saved requirement",
+            model="fake-minutes",
+            status=MeetingMinutesStatus.COMPLETE,
+            generated_at=timezone.now(),
+        )
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.get(
+            f"/meetings/{meeting.id}/",
+            {"minutes_type": MeetingType.REQUIREMENT_GATHERING},
+        )
+        post_response = self.client.post(
+            f"/meetings/{meeting.id}/minutes/",
+            {"meeting_type": MeetingType.PROJECT_MANAGER_NOTES},
+        )
+
+        meeting.refresh_from_db()
+        self.assertContains(response, "Saved outputs")
+        self.assertContains(response, "- Saved requirement")
+        self.assertContains(response, "Project manager notes")
+        self.assertEqual(post_response.status_code, 302)
+        self.assertIn(f"minutes_type={MeetingType.PROJECT_MANAGER_NOTES}", post_response["Location"])
+        self.assertEqual(meeting.meeting_type, MeetingType.PROJECT_MANAGER_NOTES)
+        self.assertEqual(meeting.minutes_text, "Saved PM notes")
+        self.assertEqual(
+            MeetingMinutesOutput.objects.filter(meeting=meeting, status=MeetingMinutesStatus.COMPLETE).count(),
+            2,
+        )
+
     def test_requirement_gathering_prompt_outputs_only_final_requirements(self):
         meeting = self.make_meeting()
         meeting.meeting_type = MeetingType.REQUIREMENT_GATHERING
@@ -864,6 +933,40 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Keep the notes around the same length and density", final_prompt)
         self.assertIn("Reference style and length", final_prompt)
 
+    def test_lujy_pm_notes_prompt_uses_compact_grouped_company_guidance(self):
+        meeting = self.make_meeting(title="ScoutX planning")
+        meeting.meeting_type = MeetingType.LUJY_PM_NOTES
+
+        prompt = build_minutes_prompt(
+            meeting,
+            "person_1: Bit68 recommends grouping the academy flow. person_2: Client wants chat buttons.",
+        )
+
+        self.assertIn("Lujy PM Notes", prompt)
+        self.assertIn("Be more summarized than standard Project Manager Notes", prompt)
+        self.assertIn("Group all related requirements under the same topic", prompt)
+        self.assertIn("Do not write person_1", prompt)
+        self.assertIn("Use actual company", prompt)
+        self.assertIn("Target 450-850 words", prompt)
+
+    def test_lujy_pm_notes_chunked_prompts_group_and_compact(self):
+        meeting = self.make_meeting(title="Long Lujy PM meeting")
+
+        final_prompt = build_lujy_project_manager_final_prompt(
+            meeting,
+            "Chunk 1 notes:\nAcademy Flow\n- Add team filter.",
+        )
+        compact_prompt = build_lujy_project_manager_compaction_prompt(
+            meeting,
+            "Meeting Details:\n\nDiscussion Points:\n\nAcademy Flow\n- Add filters.",
+        )
+
+        self.assertIn("Create \"Lujy PM Notes\"", final_prompt)
+        self.assertIn("Do not scatter related requirements", final_prompt)
+        self.assertIn("person_1", final_prompt)
+        self.assertIn("Hard maximum: 1,000 words", compact_prompt)
+        self.assertIn("Group all related requirements under the same topic", compact_prompt)
+
     def test_project_manager_compaction_prompt_preserves_information_with_word_cap(self):
         meeting = self.make_meeting(title="Long PM meeting")
 
@@ -889,6 +992,14 @@ class MeetingMinutesTests(TestCase):
         meeting.minutes_text = "- The system must support approvals."
         meeting.minutes_model = "fake-minutes"
         meeting.save(update_fields=["minutes_text", "minutes_model"])
+        MeetingMinutesOutput.objects.create(
+            meeting=meeting,
+            meeting_type=meeting.meeting_type,
+            text=meeting.minutes_text,
+            model=meeting.minutes_model,
+            status=MeetingMinutesStatus.COMPLETE,
+            generated_at=timezone.now(),
+        )
         message = MeetingMessage.objects.create(
             meeting=meeting,
             user=self.user,
@@ -921,6 +1032,13 @@ class MeetingMinutesTests(TestCase):
         meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
         meeting.minutes_text = "Meeting Details:\n\nDate: 2026-05-19\nTime: 10:00\nLocation/Platform: Google Meet\nAttendees:\n\nLujain\n\nDiscussion Points:\n\nAdmin Profile\n- Add an Admin Profile flow from the sidebar."
         meeting.save(update_fields=["meeting_type", "minutes_text"])
+        MeetingMinutesOutput.objects.create(
+            meeting=meeting,
+            meeting_type=MeetingType.PROJECT_MANAGER_NOTES,
+            text=meeting.minutes_text,
+            status=MeetingMinutesStatus.COMPLETE,
+            generated_at=timezone.now(),
+        )
         self.client.login(username=self.user.username, password="strong-password-123")
 
         detail_response = self.client.get(f"/meetings/{meeting.id}/")

@@ -8,7 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 from openai import OpenAI
 
-from .models import Meeting, MeetingMinutesStatus, MeetingStatus, MeetingType
+from .models import Meeting, MeetingMinutesOutput, MeetingMinutesStatus, MeetingStatus, MeetingType
 from .openai_utils import chat_completion_options
 
 
@@ -28,6 +28,8 @@ class MinutesResult:
 
 
 PM_NOTES_COMPACT_WORD_LIMIT = 1500
+LUJY_PM_NOTES_COMPACT_WORD_LIMIT = 900
+PM_NOTES_TYPES = {MeetingType.PROJECT_MANAGER_NOTES, MeetingType.LUJY_PM_NOTES}
 
 
 class OpenAIMinutesClient:
@@ -43,7 +45,7 @@ class OpenAIMinutesClient:
         if not transcript.strip():
             raise MinutesInputError("This meeting does not have completed transcriptions yet.")
 
-        if meeting.meeting_type == MeetingType.PROJECT_MANAGER_NOTES:
+        if meeting.meeting_type in PM_NOTES_TYPES:
             return self.generate_project_manager_notes(meeting, transcript)
 
         response = self.client.chat.completions.create(
@@ -67,6 +69,7 @@ class OpenAIMinutesClient:
         chunks = chunk_transcript(transcript)
         chunk_notes = []
         chunk_responses = []
+        is_lujy_notes = meeting.meeting_type == MeetingType.LUJY_PM_NOTES
         for index, chunk in enumerate(chunks, start=1):
             response = self.client.chat.completions.create(
                 **chat_completion_options(self.model, temperature=0.2),
@@ -77,7 +80,11 @@ class OpenAIMinutesClient:
                     },
                     {
                         "role": "user",
-                        "content": build_project_manager_chunk_prompt(
+                        "content": (
+                            build_lujy_project_manager_chunk_prompt
+                            if is_lujy_notes
+                            else build_project_manager_chunk_prompt
+                        )(
                             meeting,
                             chunk,
                             chunk_index=index,
@@ -103,7 +110,11 @@ class OpenAIMinutesClient:
                 },
                 {
                     "role": "user",
-                    "content": build_project_manager_final_prompt(meeting, combined_notes),
+                    "content": (
+                        build_lujy_project_manager_final_prompt
+                        if is_lujy_notes
+                        else build_project_manager_final_prompt
+                    )(meeting, combined_notes),
                 },
             ],
         )
@@ -115,7 +126,8 @@ class OpenAIMinutesClient:
             "final_response": final_raw,
             "compacted": False,
         }
-        if word_count(text) > PM_NOTES_COMPACT_WORD_LIMIT:
+        compact_word_limit = LUJY_PM_NOTES_COMPACT_WORD_LIMIT if is_lujy_notes else PM_NOTES_COMPACT_WORD_LIMIT
+        if word_count(text) > compact_word_limit:
             compact_response = self.client.chat.completions.create(
                 **chat_completion_options(self.model, temperature=0.2),
                 messages=[
@@ -125,7 +137,11 @@ class OpenAIMinutesClient:
                     },
                     {
                         "role": "user",
-                        "content": build_project_manager_compaction_prompt(meeting, text),
+                        "content": (
+                            build_lujy_project_manager_compaction_prompt
+                            if is_lujy_notes
+                            else build_project_manager_compaction_prompt
+                        )(meeting, text),
                     },
                 ],
             )
@@ -145,79 +161,79 @@ class OpenAIMinutesClient:
 def generate_minutes_for_meeting(
     meeting: Meeting,
     client: OpenAIMinutesClient | None = None,
+    output: MeetingMinutesOutput | None = None,
 ) -> Meeting:
-    meeting.minutes_status = MeetingMinutesStatus.PROCESSING
-    meeting.minutes_started_at = timezone.now()
-    meeting.minutes_last_error = ""
-    meeting.save(
-        update_fields=[
-            "minutes_status",
-            "minutes_started_at",
-            "minutes_last_error",
-            "updated_at",
-        ],
-    )
+    output = output or get_minutes_output(meeting)
+    output.status = MeetingMinutesStatus.PROCESSING
+    output.started_at = timezone.now()
+    output.last_error = ""
+    output.save(update_fields=["status", "started_at", "last_error", "updated_at"])
+    sync_meeting_minutes_fields(meeting, output)
     try:
         client = client or OpenAIMinutesClient()
         result = client.generate(meeting)
     except Exception as exc:
-        meeting.minutes_status = MeetingMinutesStatus.FAILED
-        meeting.minutes_last_error = str(exc)
-        meeting.save(update_fields=["minutes_status", "minutes_last_error", "updated_at"])
+        output.status = MeetingMinutesStatus.FAILED
+        output.last_error = str(exc)
+        output.save(update_fields=["status", "last_error", "updated_at"])
+        sync_meeting_minutes_fields(meeting, output)
         raise
 
-    meeting.minutes_text = result.text
-    meeting.minutes_model = result.model
-    meeting.minutes_response = result.raw_response
-    meeting.minutes_generated_at = timezone.now()
-    meeting.minutes_status = MeetingMinutesStatus.COMPLETE
-    meeting.minutes_last_error = ""
-    meeting.save(
+    output.text = result.text
+    output.model = result.model
+    output.response = result.raw_response
+    output.generated_at = timezone.now()
+    output.status = MeetingMinutesStatus.COMPLETE
+    output.last_error = ""
+    output.save(
         update_fields=[
-            "minutes_text",
-            "minutes_model",
-            "minutes_response",
-            "minutes_generated_at",
-            "minutes_status",
-            "minutes_last_error",
+            "text",
+            "model",
+            "response",
+            "generated_at",
+            "status",
+            "last_error",
             "updated_at",
         ],
     )
+    sync_meeting_minutes_fields(meeting, output)
     return meeting
 
 
 def queue_minutes_for_meeting(meeting: Meeting) -> Meeting:
-    meeting.minutes_status = MeetingMinutesStatus.PENDING
-    meeting.minutes_requested_at = timezone.now()
-    meeting.minutes_started_at = None
-    meeting.minutes_last_error = ""
-    meeting.minutes_text = ""
-    meeting.minutes_model = ""
-    meeting.minutes_response = {}
-    meeting.minutes_generated_at = None
-    meeting.save(
+    output = get_minutes_output(meeting)
+    output.status = MeetingMinutesStatus.PENDING
+    output.requested_at = timezone.now()
+    output.started_at = None
+    output.last_error = ""
+    output.text = ""
+    output.model = ""
+    output.response = {}
+    output.generated_at = None
+    output.save(
         update_fields=[
-            "minutes_status",
-            "minutes_requested_at",
-            "minutes_started_at",
-            "minutes_last_error",
-            "minutes_text",
-            "minutes_model",
-            "minutes_response",
-            "minutes_generated_at",
+            "status",
+            "requested_at",
+            "started_at",
+            "last_error",
+            "text",
+            "model",
+            "response",
+            "generated_at",
             "updated_at",
         ],
     )
+    sync_meeting_minutes_fields(meeting, output)
     return meeting
 
 
-def claim_next_pending_minutes() -> Meeting | None:
+def claim_next_pending_minutes() -> MeetingMinutesOutput | None:
     requeue_stale_minutes()
     with transaction.atomic():
-        queryset = Meeting.objects.filter(
-            status=MeetingStatus.COMPLETE,
-            minutes_status=MeetingMinutesStatus.PENDING,
-        ).exclude(meeting_type="")
+        queryset = MeetingMinutesOutput.objects.select_related("meeting").filter(
+            meeting__status=MeetingStatus.COMPLETE,
+            status=MeetingMinutesStatus.PENDING,
+        )
         connection_features = transaction.get_connection().features
         if connection_features.has_select_for_update:
             if connection_features.has_select_for_update_skip_locked:
@@ -225,22 +241,16 @@ def claim_next_pending_minutes() -> Meeting | None:
             else:
                 queryset = queryset.select_for_update()
 
-        meeting = queryset.order_by("minutes_requested_at", "updated_at").first()
-        if meeting is None:
+        output = queryset.order_by("requested_at", "updated_at").first()
+        if output is None:
             return None
 
-        meeting.minutes_status = MeetingMinutesStatus.PROCESSING
-        meeting.minutes_started_at = timezone.now()
-        meeting.minutes_last_error = ""
-        meeting.save(
-            update_fields=[
-                "minutes_status",
-                "minutes_started_at",
-                "minutes_last_error",
-                "updated_at",
-            ],
-        )
-        return meeting
+        output.status = MeetingMinutesStatus.PROCESSING
+        output.started_at = timezone.now()
+        output.last_error = ""
+        output.save(update_fields=["status", "started_at", "last_error", "updated_at"])
+        sync_meeting_minutes_fields(output.meeting, output)
+        return output
 
 
 def requeue_stale_minutes() -> int:
@@ -249,14 +259,14 @@ def requeue_stale_minutes() -> int:
         return 0
 
     cutoff = timezone.now() - timedelta(seconds=stale_after)
-    return Meeting.objects.filter(
-        minutes_status=MeetingMinutesStatus.PROCESSING,
-        minutes_generated_at__isnull=True,
-        minutes_started_at__lt=cutoff,
+    return MeetingMinutesOutput.objects.filter(
+        status=MeetingMinutesStatus.PROCESSING,
+        generated_at__isnull=True,
+        started_at__lt=cutoff,
     ).update(
-        minutes_status=MeetingMinutesStatus.PENDING,
-        minutes_started_at=None,
-        minutes_last_error="",
+        status=MeetingMinutesStatus.PENDING,
+        started_at=None,
+        last_error="",
         updated_at=timezone.now(),
     )
 
@@ -264,13 +274,52 @@ def requeue_stale_minutes() -> int:
 def process_next_pending_minutes(
     client: OpenAIMinutesClient | None = None,
 ) -> Meeting | None:
-    meeting = claim_next_pending_minutes()
-    if meeting is None:
+    output = claim_next_pending_minutes()
+    if output is None:
         return None
     try:
-        return generate_minutes_for_meeting(meeting, client=client)
+        meeting = output.meeting
+        meeting.meeting_type = output.meeting_type
+        return generate_minutes_for_meeting(meeting, client=client, output=output)
     except Exception:
-        return meeting
+        return output.meeting
+
+
+def get_minutes_output(meeting: Meeting) -> MeetingMinutesOutput:
+    if not meeting.meeting_type:
+        raise MinutesInputError("Choose a meeting type before extracting minutes.")
+    output, _ = MeetingMinutesOutput.objects.get_or_create(
+        meeting=meeting,
+        meeting_type=meeting.meeting_type,
+    )
+    return output
+
+
+def sync_meeting_minutes_fields(meeting: Meeting, output: MeetingMinutesOutput) -> Meeting:
+    meeting.meeting_type = output.meeting_type
+    meeting.minutes_text = output.text
+    meeting.minutes_model = output.model
+    meeting.minutes_response = output.response
+    meeting.minutes_generated_at = output.generated_at
+    meeting.minutes_last_error = output.last_error
+    meeting.minutes_status = output.status
+    meeting.minutes_requested_at = output.requested_at
+    meeting.minutes_started_at = output.started_at
+    meeting.save(
+        update_fields=[
+            "meeting_type",
+            "minutes_text",
+            "minutes_model",
+            "minutes_response",
+            "minutes_generated_at",
+            "minutes_last_error",
+            "minutes_status",
+            "minutes_requested_at",
+            "minutes_started_at",
+            "updated_at",
+        ],
+    )
+    return meeting
 
 
 def build_transcript(meeting: Meeting) -> str:
@@ -300,6 +349,8 @@ def build_minutes_prompt(meeting: Meeting, transcript: str) -> str:
         return build_requirements_prompt(meeting, transcript, meeting_type)
     if meeting.meeting_type == MeetingType.PROJECT_MANAGER_NOTES:
         return build_project_manager_notes_prompt(meeting, transcript, meeting_type)
+    if meeting.meeting_type == MeetingType.LUJY_PM_NOTES:
+        return build_lujy_project_manager_notes_prompt(meeting, transcript, meeting_type)
 
     type_guidance = {
         "requirement_gathering_minutes": (
@@ -496,6 +547,185 @@ Rules:
 
 Draft notes:
 {draft_notes}
+"""
+
+
+def build_lujy_project_manager_chunk_prompt(
+    meeting: Meeting,
+    transcript_chunk: str,
+    *,
+    chunk_index: int,
+    chunk_count: int,
+) -> str:
+    return f"""Meeting title: {meeting.title or "Untitled meeting"}
+Transcript chunk: {chunk_index} of {chunk_count}
+
+Task:
+Extract raw notes for the "Lujy PM Notes" output from this transcript chunk only.
+
+Rules:
+- This is an extraction pass. Capture concrete product and project-management information without polishing it too much.
+- Capture requested changes, decisions, constraints, edge cases, fields, filters, role permissions, screens, flows, buttons, validation rules, UX notes, risks, and open points.
+- Keep enough context to let the final pass group related requirements under one topic.
+- If multiple lines refer to the same topic, keep them adjacent under one heading instead of scattering them.
+- The transcript may use generic labels such as person_1 or person_2. Do not preserve those labels. Extract the real company, vendor, client, or team name when the chunk makes it clear. If the company name is not clear, use the role side only when useful, such as Client, Bit68, Vendor, or Product team.
+- Do not invent a company name. If attribution is not needed, omit attribution entirely.
+- Include uncertain or mistranscribed terms when the intended meaning is reasonably clear, and mark unclear wording as unclear.
+- If a point is contradicted or removed later inside this same chunk, keep only the later/final direction.
+- If the chunk has no usable notes, write "No concrete notes in this chunk."
+
+Transcript chunk:
+{transcript_chunk}
+"""
+
+
+def build_lujy_project_manager_final_prompt(meeting: Meeting, extracted_chunk_notes: str) -> str:
+    meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
+    return f"""Meeting title: {meeting.title or "Untitled meeting"}
+Metadata date: {meeting_date}
+Metadata time: {meeting_time}
+Started at: {meeting.started_at.isoformat()}
+Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
+
+You are given raw notes extracted from a full meeting transcript.
+
+Task:
+Create "Lujy PM Notes": compact project manager notes that are summarized like requirements gathering output, but still preserve every concrete project detail.
+
+Critical rules:
+- Output only the final notes.
+- Use the exact top-level structure below.
+- Be more summarized than the standard Project Manager Notes output.
+- Target 450-850 words. For an unusually dense meeting, you may go up to 1,000 words only if needed to avoid losing concrete requirements.
+- Do not scatter related requirements. Group all related items under the same topic heading, even if they came from different transcript chunks.
+- Merge repeated or closely related bullets when no concrete information is lost.
+- The output can omit who said what, filler, repeated wording, examples that add no new requirement, and conversational phrasing.
+- The output must not omit unique product or project-management information: requirements, decisions, constraints, edge cases, filters, fields, role permissions, screen or flow changes, buttons, validation rules, risks, UX notes, and open points.
+- Do not write generic transcript labels such as person_1, person_2, speaker_1, or speaker_2.
+- When attribution matters, use actual company, vendor, client, or team names inferred from the transcript or extracted notes. If the actual company name is not clear, use Client, Bit68, Vendor, Product team, or Not specified as appropriate.
+- Do not invent attendees or company names. If attendees are unclear, write "Not specified".
+- If something is discussed and later removed, omit it completely.
+- If two points contradict each other, keep the later one and omit the earlier one.
+- Use implementation-ready wording.
+- Use plain text with hyphen bullets, not Markdown tables.
+
+Use this exact structure:
+
+Meeting Details:
+
+Date: {meeting_date}
+Time: {meeting_time}
+Location/Platform: [Use the platform if known from the notes, otherwise "Not specified"]
+
+Attendees:
+
+[List attendee names or company/team names, one per line. Do not use person_1/person_2. If unclear, write "Not specified"]
+
+Discussion Points:
+
+[Group by product area, feature, flow, screen, role, or topic. Keep each topic in one place.]
+
+Style reference:
+
+Discussion Points:
+
+Academy Admin Flow
+
+- Academy players should support filtering by team, assigned/unassigned status, and position.
+- Assigned players should allow changing team assignment, removing from the team, or removing from the academy.
+- Unassigned players should allow assigning to a team or removing from the academy.
+
+Player Flow
+
+- Players should choose between joining an academy and joining as a floating user.
+- Floating users should indicate whether they already belong to an academy outside the product and may optionally add the academy name.
+
+Extracted notes:
+{extracted_chunk_notes}
+"""
+
+
+def build_lujy_project_manager_compaction_prompt(meeting: Meeting, draft_notes: str) -> str:
+    meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
+    return f"""Meeting title: {meeting.title or "Untitled meeting"}
+Metadata date: {meeting_date}
+Metadata time: {meeting_time}
+
+You are given draft "Lujy PM Notes" that are too long or too scattered.
+
+Task:
+Rewrite them into compact, grouped project-manager notes.
+
+Rules:
+- Output only the rewritten notes.
+- Keep the exact same top-level structure: Meeting Details, Attendees, Discussion Points.
+- Target 450-850 words. Hard maximum: 1,000 words.
+- Preserve every unique requirement, decision, constraint, edge case, filter, field, role permission, screen or flow change, button, validation rule, risk, UX note, and open point.
+- Group all related requirements under the same topic. Do not repeat the same topic in multiple places.
+- Merge sibling bullets aggressively when no information is lost.
+- Do not output person_1, person_2, speaker_1, or speaker_2. Use real company/team names if clear; otherwise omit attribution or use Client, Bit68, Vendor, Product team, or Not specified.
+- Keep date and time as:
+  - Date: {meeting_date}
+  - Time: {meeting_time}
+
+Draft notes:
+{draft_notes}
+"""
+
+
+def build_lujy_project_manager_notes_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
+    meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
+    return f"""Meeting type: {meeting_type}
+Meeting title: {meeting.title or "Untitled meeting"}
+Metadata date: {meeting_date}
+Metadata time: {meeting_time}
+Started at: {meeting.started_at.isoformat()}
+Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
+
+Instructions:
+- You are generating "Lujy PM Notes" from a transcribed meeting.
+- The transcript may contain transcription mistakes, wrong speaker labels, missing punctuation, repeated phrases, or misheard product and feature names. Deduce the intended meaning when reasonably clear, but do not invent requirements or decisions.
+- Be more summarized than standard Project Manager Notes, similar to Requirements Gathering output, while preserving all concrete project information.
+- Output only the notes. Do not include explanations or a conversational summary.
+- Use the exact top-level structure below.
+- Target 450-850 words. For a dense meeting, go up to 1,000 words only if needed.
+- Group all related requirements under the same topic. Do not scatter related items across multiple headings.
+- Merge related bullets when no information is lost.
+- Do not write person_1, person_2, speaker_1, or speaker_2 anywhere.
+- Use actual company, vendor, client, or team names when they can be inferred from the transcript. If the actual name is not clear, use Client, Bit68, Vendor, Product team, or Not specified only when attribution matters.
+- If attribution does not matter to the requirement, omit attribution.
+- Do not invent attendees or company names.
+- If something is discussed and later removed, omit it completely.
+- If two points contradict each other, keep the later one and omit the earlier one.
+- Use implementation-ready wording.
+- Use plain text with hyphen bullets, not Markdown tables.
+
+Use this exact structure:
+
+Meeting Details:
+
+Date: {meeting_date}
+Time: {meeting_time}
+Location/Platform: [Use the platform if known from the transcript, otherwise "Not specified"]
+
+Attendees:
+
+[List attendee names or company/team names, one per line. Do not use person_1/person_2. If unclear, write "Not specified"]
+
+Discussion Points:
+
+[Group by product area, feature, flow, screen, role, or topic. Keep each topic in one place.]
+
+For each discussion topic:
+- Use a short heading.
+- Preserve all concrete requirements, decisions, UX notes, edge cases, and clarifications.
+- Prefer compact bullets over paragraphs.
+- Keep wording close to implementation-ready notes.
+- Do not include timestamps.
+- Include only the final chosen direction when alternatives are discussed.
+
+Transcript:
+{transcript}
 """
 
 

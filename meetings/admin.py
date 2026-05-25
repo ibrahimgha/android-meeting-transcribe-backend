@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AudioSegment, Meeting, MeetingImport, MeetingMessage, UserWebSettings
+from .models import AudioSegment, Meeting, MeetingImport, MeetingMessage, MeetingMinutesOutput, UserWebSettings
 
 
 class AudioSegmentInline(admin.TabularInline):
@@ -55,6 +55,29 @@ class MeetingImportInline(admin.TabularInline):
     ]
 
 
+class MeetingMinutesOutputInline(admin.TabularInline):
+    model = MeetingMinutesOutput
+    extra = 0
+    readonly_fields = [
+        "id",
+        "meeting_type",
+        "status",
+        "generated_at",
+        "model",
+        "last_error",
+        "created_at",
+    ]
+    fields = [
+        "id",
+        "meeting_type",
+        "status",
+        "generated_at",
+        "model",
+        "last_error",
+        "created_at",
+    ]
+
+
 @admin.register(Meeting)
 class MeetingAdmin(admin.ModelAdmin):
     list_display = [
@@ -84,7 +107,7 @@ class MeetingAdmin(admin.ModelAdmin):
         "title_generated_at",
         "title_model",
     ]
-    inlines = [MeetingImportInline, MeetingMessageInline, AudioSegmentInline]
+    inlines = [MeetingImportInline, MeetingMinutesOutputInline, MeetingMessageInline, AudioSegmentInline]
 
 
 @admin.register(AudioSegment)
@@ -136,6 +159,14 @@ class MeetingImportAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "created_at"]
     search_fields = ["id", "meeting__id", "original_filename", "user__username"]
+
+
+@admin.register(MeetingMinutesOutput)
+class MeetingMinutesOutputAdmin(admin.ModelAdmin):
+    list_display = ["id", "meeting", "meeting_type", "status", "model", "generated_at", "updated_at"]
+    list_filter = ["meeting_type", "status", "generated_at"]
+    search_fields = ["id", "meeting__id", "meeting__title", "text", "last_error"]
+    readonly_fields = ["id", "created_at", "updated_at"]
 
 
 @admin.register(UserWebSettings)

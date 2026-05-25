@@ -216,6 +216,30 @@
             border-top: 1px solid var(--line);
             padding-top: 16px;
         }
+        .saved-outputs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 8px 0 14px;
+        }
+        .saved-output {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 6px 10px;
+            background: #fafcff;
+            color: var(--muted);
+            font-size: 13px;
+            text-decoration: none;
+        }
+        .saved-output.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: #eef3ff;
+            font-weight: 700;
+        }
         .minutes h3 {
             margin: 0 0 8px;
             font-size: 17px;

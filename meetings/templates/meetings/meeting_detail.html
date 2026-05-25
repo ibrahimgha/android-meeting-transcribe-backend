@@ -96,49 +96,67 @@
             </label>
             {{ minutes_form.meeting_type }}
         </div>
-        {% if meeting.minutes_status == "pending" or meeting.minutes_status == "processing" %}
+        {% if selected_minutes_status == "pending" or selected_minutes_status == "processing" %}
             <button type="submit" disabled>Extracting meeting minutes...</button>
         {% else %}
             <button type="submit">Extract meeting minutes</button>
         {% endif %}
     </form>
 
-    {% if meeting.minutes_status == "pending" or meeting.minutes_status == "processing" %}
+    {% if saved_minutes_outputs %}
+        <div class="meta">Saved outputs</div>
+        <div class="saved-outputs">
+            {% for output in saved_minutes_outputs %}
+                <a
+                    class="saved-output {% if selected_minutes_output and selected_minutes_output.meeting_type == output.meeting_type %}active{% endif %}"
+                    href="{% url 'web-meeting-detail' meeting.id %}?minutes_type={{ output.meeting_type }}"
+                >
+                    {{ output.get_meeting_type_display }}
+                    · {{ output.get_status_display }}
+                    {% if output.generated_at %}
+                        · {{ output.generated_at|date:"Y-m-d H:i" }}
+                    {% endif %}
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if selected_minutes_status == "pending" or selected_minutes_status == "processing" %}
         <div class="meta">Meeting minutes are being extracted in the background.</div>
     {% endif %}
 
-    {% if meeting.minutes_last_error %}
-        <div class="message error">{{ meeting.minutes_last_error }}</div>
+    {% if selected_minutes_output and selected_minutes_output.last_error %}
+        <div class="message error">{{ selected_minutes_output.last_error }}</div>
     {% endif %}
 
-    {% if meeting.minutes_text %}
+    {% if selected_minutes_output and selected_minutes_output.text %}
         <section class="minutes">
             <h3>Meeting minutes</h3>
             <div class="meta">
-                {{ meeting.get_meeting_type_display }}
-                {% if meeting.minutes_generated_at %}
-                    · Generated {{ meeting.minutes_generated_at|date:"Y-m-d H:i" }}
+                {{ selected_minutes_output.get_meeting_type_display }}
+                {% if selected_minutes_output.generated_at %}
+                    · Generated {{ selected_minutes_output.generated_at|date:"Y-m-d H:i" }}
                 {% endif %}
-            {% if meeting.minutes_model %}
-                · {{ meeting.minutes_model }}
+            {% if selected_minutes_output.model %}
+                · {{ selected_minutes_output.model }}
             {% endif %}
         </div>
-        {% if meeting.meeting_type == "requirement_gathering" %}
+        {% if selected_minutes_output.meeting_type == "requirement_gathering" %}
             <div class="actions">
-                <textarea id="proposal-requirements-text" class="clipboard-source" readonly>{{ meeting.minutes_text }}</textarea>
+                <textarea id="proposal-requirements-text" class="clipboard-source" readonly>{{ selected_minutes_output.text }}</textarea>
                 <button id="paste-in-proposal-generator" type="button">
                     Paste in proposal generator
                 </button>
             </div>
         {% endif %}
-        {% if meeting.meeting_type == "project_manager_notes" %}
+        {% if selected_minutes_output.meeting_type in pm_notes_types %}
             <div class="actions">
-                <a class="button" href="{% url 'web-meeting-minutes-pdf' meeting.id %}">
+                <a class="button" href="{% url 'web-meeting-minutes-pdf' meeting.id %}?minutes_type={{ selected_minutes_output.meeting_type }}">
                     Download PM notes PDF
                 </a>
             </div>
         {% endif %}
-        <pre>{{ meeting.minutes_text }}</pre>
+        <pre>{{ selected_minutes_output.text }}</pre>
     </section>
 {% endif %}
 </article>
@@ -246,7 +264,7 @@
         window.setTimeout(poll, 2000);
     })();
 </script>
-{% if meeting.minutes_text and meeting.meeting_type == "requirement_gathering" %}
+{% if selected_minutes_output and selected_minutes_output.text and selected_minutes_output.meeting_type == "requirement_gathering" %}
     <script>
         (function () {
             const button = document.getElementById("paste-in-proposal-generator");

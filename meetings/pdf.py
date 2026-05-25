@@ -32,7 +32,7 @@ TITLE_BAND = colors.HexColor("#d9d9d9")
 TEXT = colors.HexColor("#182033")
 
 
-def build_pm_notes_pdf(meeting: Meeting) -> bytes:
+def build_pm_notes_pdf(meeting: Meeting, *, minutes_text: str | None = None) -> bytes:
     buffer = BytesIO()
     register_fonts()
     doc = SimpleDocTemplate(
@@ -46,7 +46,7 @@ def build_pm_notes_pdf(meeting: Meeting) -> bytes:
         author="Bit68",
     )
     styles = build_styles()
-    story = build_story(meeting, styles)
+    story = build_story(meeting, styles, minutes_text=minutes_text)
     doc.build(story, onFirstPage=lambda c, d: draw_page(c, d, meeting), onLaterPages=lambda c, d: draw_page(c, d, meeting))
     return buffer.getvalue()
 
@@ -164,17 +164,18 @@ def build_styles() -> dict[str, ParagraphStyle]:
     }
 
 
-def build_story(meeting: Meeting, styles: dict[str, ParagraphStyle]) -> list:
+def build_story(meeting: Meeting, styles: dict[str, ParagraphStyle], *, minutes_text: str | None = None) -> list:
     story = [
         build_title_band("Project Manager Meeting Notes", styles),
         Spacer(1, 14),
         Paragraph(escape_text(meeting.title or "Untitled meeting"), styles["subtitle"]),
     ]
-    if not meeting.minutes_text.strip():
+    notes_text = meeting.minutes_text if minutes_text is None else minutes_text
+    if not notes_text.strip():
         story.append(Paragraph("No project manager notes have been generated yet.", styles["body"]))
         return story
 
-    lines = meeting.minutes_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines = notes_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     for index, raw_line in enumerate(lines):
         line = raw_line.rstrip()
         stripped = line.strip()
