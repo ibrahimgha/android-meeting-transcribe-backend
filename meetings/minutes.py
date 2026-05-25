@@ -561,17 +561,22 @@ def build_lujy_project_manager_chunk_prompt(
 Transcript chunk: {chunk_index} of {chunk_count}
 
 Task:
-Extract raw notes for the "Lujy PM Notes" output from this transcript chunk only.
+Extract normalized source material for the "Lujy PM Notes" output from this transcript chunk only.
 
 Rules:
-- This is an extraction pass. Capture concrete product and project-management information without polishing it too much.
+- This is not a transcript recap. Do not preserve the conversation flow, back-and-forth, examples, or exact phrasing.
+- Convert the discussion into useful conclusions, decisions, actionable requirements, open points, risks, and implementation notes.
+- Capture only information that affects product scope, implementation, UX, delivery, ownership, risk, or next steps.
 - Capture requested changes, decisions, constraints, edge cases, fields, filters, role permissions, screens, flows, buttons, validation rules, UX notes, risks, and open points.
+- Omit filler, repetition, negotiation wording, explanations of why someone thinks something, and anything that does not change the final project understanding.
 - Keep enough context to let the final pass group related requirements under one topic.
 - If multiple lines refer to the same topic, keep them adjacent under one heading instead of scattering them.
 - The transcript may use generic labels such as person_1 or person_2. Do not preserve those labels. Extract the real company, vendor, client, or team name when the chunk makes it clear. If the company name is not clear, use the role side only when useful, such as Client, Bit68, Vendor, or Product team.
 - Do not invent a company name. If attribution is not needed, omit attribution entirely.
 - Include uncertain or mistranscribed terms when the intended meaning is reasonably clear, and mark unclear wording as unclear.
 - If a point is contradicted or removed later inside this same chunk, keep only the later/final direction.
+- Prefer normalized bullets such as "Add...", "Remove...", "The system should...", "Decision:", "Action:", "Open point:", or "Risk:".
+- Do not write bullets like "Person X said...", "The client discussed...", "They talked about...", or "It was mentioned that..." unless the speaker identity itself creates an action or responsibility.
 - If the chunk has no usable notes, write "No concrete notes in this chunk."
 
 Transcript chunk:
@@ -590,17 +595,19 @@ Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
 You are given raw notes extracted from a full meeting transcript.
 
 Task:
-Create "Lujy PM Notes": compact project manager notes that are summarized like requirements gathering output, but still preserve every concrete project detail.
+Create "Lujy PM Notes": refined project-manager notes that synthesize the useful conclusions, decisions, actionable requirements, open points, and risks from the meeting.
 
 Critical rules:
 - Output only the final notes.
 - Use the exact top-level structure below.
-- Be more summarized than the standard Project Manager Notes output.
-- Target 450-850 words. For an unusually dense meeting, you may go up to 1,000 words only if needed to avoid losing concrete requirements.
+- This must read like a structured requirements/conclusions document, not like meeting minutes and not like a transcript recap.
+- Be summarized like the Requirements Gathering output: concise, grouped, and outcome-focused.
+- Target 300-650 words. For an unusually dense meeting, you may go up to 850 words only if needed to preserve important conclusions.
 - Do not scatter related requirements. Group all related items under the same topic heading, even if they came from different transcript chunks.
-- Merge repeated or closely related bullets when no concrete information is lost.
-- The output can omit who said what, filler, repeated wording, examples that add no new requirement, and conversational phrasing.
-- The output must not omit unique product or project-management information: requirements, decisions, constraints, edge cases, filters, fields, role permissions, screen or flow changes, buttons, validation rules, risks, UX notes, and open points.
+- Merge repeated or closely related bullets into one refined bullet whenever they lead to the same conclusion.
+- Omit who said what, filler, repeated wording, examples that add no new requirement, conversational phrasing, and discussion history.
+- Preserve useful final information: requirements, decisions, constraints, edge cases, filters, fields, role permissions, screen or flow changes, buttons, validation rules, risks, UX notes, actions, and open points.
+- Every bullet must be one of these useful outputs: a requirement, decision, action item, open point, risk, constraint, or UX/delivery note.
 - Do not write generic transcript labels such as person_1, person_2, speaker_1, or speaker_2.
 - When attribution matters, use actual company, vendor, client, or team names inferred from the transcript or extracted notes. If the actual company name is not clear, use Client, Bit68, Vendor, Product team, or Not specified as appropriate.
 - Do not invent attendees or company names. If attendees are unclear, write "Not specified".
@@ -608,6 +615,7 @@ Critical rules:
 - If two points contradict each other, keep the later one and omit the earlier one.
 - Use implementation-ready wording.
 - Use plain text with hyphen bullets, not Markdown tables.
+- Do not write "said", "mentioned", "discussed", "talked about", "asked about", "explained", or similar transcript-recapping language unless it is required to assign an owner or action.
 
 Use this exact structure:
 
@@ -654,15 +662,17 @@ Metadata time: {meeting_time}
 You are given draft "Lujy PM Notes" that are too long or too scattered.
 
 Task:
-Rewrite them into compact, grouped project-manager notes.
+Rewrite them into compact, grouped, outcome-focused project-manager notes.
 
 Rules:
 - Output only the rewritten notes.
 - Keep the exact same top-level structure: Meeting Details, Attendees, Discussion Points.
-- Target 450-850 words. Hard maximum: 1,000 words.
-- Preserve every unique requirement, decision, constraint, edge case, filter, field, role permission, screen or flow change, button, validation rule, risk, UX note, and open point.
+- Target 300-650 words. Hard maximum: 850 words.
+- Preserve every useful unique requirement, decision, action item, constraint, edge case, filter, field, role permission, screen or flow change, button, validation rule, risk, UX note, and open point.
 - Group all related requirements under the same topic. Do not repeat the same topic in multiple places.
 - Merge sibling bullets aggressively when no information is lost.
+- Remove transcript-recapping language. The result should read like refined PM conclusions, not like what people said during the meeting.
+- Every bullet must be actionable or decision-oriented. Drop bullets that only describe conversation history.
 - Do not output person_1, person_2, speaker_1, or speaker_2. Use real company/team names if clear; otherwise omit attribution or use Client, Bit68, Vendor, Product team, or Not specified.
 - Keep date and time as:
   - Date: {meeting_date}
@@ -685,12 +695,16 @@ Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
 Instructions:
 - You are generating "Lujy PM Notes" from a transcribed meeting.
 - The transcript may contain transcription mistakes, wrong speaker labels, missing punctuation, repeated phrases, or misheard product and feature names. Deduce the intended meaning when reasonably clear, but do not invent requirements or decisions.
-- Be more summarized than standard Project Manager Notes, similar to Requirements Gathering output, while preserving all concrete project information.
+- Generate refined PM conclusions, not a transcript-style meeting recap.
+- Be summarized like Requirements Gathering output: concise, grouped by topic, and focused on final useful information.
+- Capture useful conclusions, decisions, actionable requirements, open points, risks, constraints, UX notes, and delivery notes.
 - Output only the notes. Do not include explanations or a conversational summary.
 - Use the exact top-level structure below.
-- Target 450-850 words. For a dense meeting, go up to 1,000 words only if needed.
+- Target 300-650 words. For a dense meeting, go up to 850 words only if needed.
 - Group all related requirements under the same topic. Do not scatter related items across multiple headings.
-- Merge related bullets when no information is lost.
+- Merge related bullets when they lead to the same conclusion or action.
+- Every bullet must be outcome-focused: a requirement, decision, action item, open point, risk, constraint, UX note, or delivery note.
+- Omit transcript process details: who said what, how the discussion evolved, examples that add no new requirement, repeated clarifications, and negotiation wording.
 - Do not write person_1, person_2, speaker_1, or speaker_2 anywhere.
 - Use actual company, vendor, client, or team names when they can be inferred from the transcript. If the actual name is not clear, use Client, Bit68, Vendor, Product team, or Not specified only when attribution matters.
 - If attribution does not matter to the requirement, omit attribution.
@@ -699,6 +713,7 @@ Instructions:
 - If two points contradict each other, keep the later one and omit the earlier one.
 - Use implementation-ready wording.
 - Use plain text with hyphen bullets, not Markdown tables.
+- Do not write "said", "mentioned", "discussed", "talked about", "asked about", "explained", or similar recap language unless it is required to assign ownership or an action.
 
 Use this exact structure:
 
@@ -718,7 +733,7 @@ Discussion Points:
 
 For each discussion topic:
 - Use a short heading.
-- Preserve all concrete requirements, decisions, UX notes, edge cases, and clarifications.
+- Preserve all useful requirements, decisions, actions, UX notes, risks, edge cases, and open points.
 - Prefer compact bullets over paragraphs.
 - Keep wording close to implementation-ready notes.
 - Do not include timestamps.

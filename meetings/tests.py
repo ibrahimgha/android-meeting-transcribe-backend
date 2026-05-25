@@ -943,11 +943,15 @@ class MeetingMinutesTests(TestCase):
         )
 
         self.assertIn("Lujy PM Notes", prompt)
-        self.assertIn("Be more summarized than standard Project Manager Notes", prompt)
+        self.assertIn("Generate refined PM conclusions", prompt)
+        self.assertIn("Be summarized like Requirements Gathering output", prompt)
         self.assertIn("Group all related requirements under the same topic", prompt)
+        self.assertIn("Every bullet must be outcome-focused", prompt)
+        self.assertIn("Omit transcript process details", prompt)
         self.assertIn("Do not write person_1", prompt)
         self.assertIn("Use actual company", prompt)
-        self.assertIn("Target 450-850 words", prompt)
+        self.assertIn("Target 300-650 words", prompt)
+        self.assertIn("Do not write \"said\", \"mentioned\", \"discussed\"", prompt)
 
     def test_lujy_pm_notes_chunked_prompts_group_and_compact(self):
         meeting = self.make_meeting(title="Long Lujy PM meeting")
@@ -962,9 +966,12 @@ class MeetingMinutesTests(TestCase):
         )
 
         self.assertIn("Create \"Lujy PM Notes\"", final_prompt)
+        self.assertIn("structured requirements/conclusions document", final_prompt)
+        self.assertIn("useful conclusions, decisions, actionable requirements", final_prompt)
         self.assertIn("Do not scatter related requirements", final_prompt)
         self.assertIn("person_1", final_prompt)
-        self.assertIn("Hard maximum: 1,000 words", compact_prompt)
+        self.assertIn("Hard maximum: 850 words", compact_prompt)
+        self.assertIn("Remove transcript-recapping language", compact_prompt)
         self.assertIn("Group all related requirements under the same topic", compact_prompt)
 
     def test_project_manager_compaction_prompt_preserves_information_with_word_cap(self):
