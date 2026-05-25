@@ -301,10 +301,11 @@ class GenerateMeetingMinutesView(LoginRequiredMixin, View):
             meeting=meeting,
             meeting_type=meeting.meeting_type,
         ).first()
-        if output and output.status == MeetingMinutesStatus.COMPLETE and output.text.strip():
+        force_regenerate = request.POST.get("force") == "1"
+        if not force_regenerate and output and output.status == MeetingMinutesStatus.COMPLETE and output.text.strip():
             sync_meeting_minutes_fields(meeting, output)
             messages.success(request, "Loaded the saved meeting output.")
-        elif output and output.status in {MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING}:
+        elif not force_regenerate and output and output.status in {MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING}:
             sync_meeting_minutes_fields(meeting, output)
             messages.info(request, "This meeting output is already being extracted.")
         else:

@@ -856,6 +856,7 @@ class MeetingMinutesTests(TestCase):
         self.assertContains(response, "Saved outputs")
         self.assertContains(response, "- Saved requirement")
         self.assertContains(response, "Project manager notes")
+        self.assertContains(response, "Regenerate this output")
         self.assertEqual(post_response.status_code, 302)
         self.assertIn(f"minutes_type={MeetingType.PROJECT_MANAGER_NOTES}", post_response["Location"])
         self.assertEqual(meeting.meeting_type, MeetingType.PROJECT_MANAGER_NOTES)
@@ -864,6 +865,33 @@ class MeetingMinutesTests(TestCase):
             MeetingMinutesOutput.objects.filter(meeting=meeting, status=MeetingMinutesStatus.COMPLETE).count(),
             2,
         )
+
+    def test_saved_minutes_output_can_be_regenerated_explicitly(self):
+        meeting = self.make_meeting()
+        meeting.meeting_type = MeetingType.LUJY_PM_NOTES
+        meeting.save(update_fields=["meeting_type"])
+        MeetingMinutesOutput.objects.create(
+            meeting=meeting,
+            meeting_type=MeetingType.LUJY_PM_NOTES,
+            text="Old transcript-like notes",
+            model="fake-minutes",
+            status=MeetingMinutesStatus.COMPLETE,
+            generated_at=timezone.now(),
+        )
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.post(
+            f"/meetings/{meeting.id}/minutes/",
+            {"meeting_type": MeetingType.LUJY_PM_NOTES, "force": "1"},
+        )
+
+        output = MeetingMinutesOutput.objects.get(
+            meeting=meeting,
+            meeting_type=MeetingType.LUJY_PM_NOTES,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(output.status, MeetingMinutesStatus.PENDING)
+        self.assertEqual(output.text, "")
 
     def test_requirement_gathering_prompt_outputs_only_final_requirements(self):
         meeting = self.make_meeting()

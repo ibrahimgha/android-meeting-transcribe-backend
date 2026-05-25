@@ -156,6 +156,12 @@
                 </a>
             </div>
         {% endif %}
+        <form class="actions" method="post" action="{% url 'web-generate-minutes' meeting.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="meeting_type" value="{{ selected_minutes_output.meeting_type }}">
+            <input type="hidden" name="force" value="1">
+            <button class="secondary" type="submit">Regenerate this output</button>
+        </form>
         <pre>{{ selected_minutes_output.text }}</pre>
     </section>
 {% endif %}
