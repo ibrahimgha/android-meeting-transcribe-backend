@@ -12,7 +12,7 @@ class MeetingMinutesForm(forms.ModelForm):
         choices=[
             choice
             for choice in MeetingType.choices
-            if choice[0] != MeetingType.LUJY_PM_NOTES
+            if choice[0] != MeetingType.COMPACT_PM_NOTES
         ],
         label="Meeting type",
         widget=forms.Select(attrs={"class": "meeting-type-select"}),

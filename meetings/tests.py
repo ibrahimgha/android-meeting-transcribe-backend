@@ -22,8 +22,8 @@ from .forms import MeetingMinutesForm
 from .minutes import (
     MinutesResult,
     build_minutes_prompt,
-    build_lujy_project_manager_compaction_prompt,
-    build_lujy_project_manager_final_prompt,
+    build_compact_project_manager_compaction_prompt,
+    build_compact_project_manager_final_prompt,
     build_project_manager_compaction_prompt,
     build_project_manager_final_prompt,
     chunk_transcript,
@@ -527,7 +527,7 @@ class MeetingMcpApiTests(TestCase):
             type_payload["meeting_types"],
         )
         self.assertNotIn(
-            MeetingType.LUJY_PM_NOTES,
+            MeetingType.COMPACT_PM_NOTES,
             [item["value"] for item in type_payload["meeting_types"]],
         )
 
@@ -606,6 +606,7 @@ class MeetingMinutesTests(TestCase):
         self.settings_override = override_settings(
             MEDIA_ROOT=self.temp_dir.name,
             IMPORT_CHUNK_BYTES=1024,
+            PROPOSAL_GENERATOR_URL="https://example.test/proposal/form/",
         )
         self.settings_override.enable()
         self.user = User.objects.create_user(
@@ -1083,7 +1084,7 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Recommended Follow-up:", prompt)
 
     def test_project_manager_notes_prompt_matches_requested_format(self):
-        meeting = self.make_meeting(title="ScoutX planning")
+        meeting = self.make_meeting(title="Product planning")
         meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
 
         prompt = build_minutes_prompt(
@@ -1114,27 +1115,27 @@ class MeetingMinutesTests(TestCase):
         transcript = "\n".join(f"[00:{index:02d}] person_1: Detail {index}" for index in range(20))
 
         chunks = chunk_transcript(transcript, max_chars=120)
-        final_prompt = build_lujy_project_manager_final_prompt(meeting, "Chunk 1 notes:\n- Add chat buttons.")
+        final_prompt = build_compact_project_manager_final_prompt(meeting, "Chunk 1 notes:\n- Add chat buttons.")
 
         self.assertGreater(len(chunks), 1)
         self.assertIn("Project Manager Notes", final_prompt)
-        self.assertNotIn("Lujy PM Notes", final_prompt)
+        self.assertNotIn("Compact PM Notes", final_prompt)
         self.assertIn("structured requirements/conclusions document", final_prompt)
         self.assertIn("Target 300-650 words", final_prompt)
         self.assertIn("Risks:", final_prompt)
         self.assertIn("Open Points:", final_prompt)
         self.assertIn("Do not place risks or open points under individual discussion topics", final_prompt)
 
-    def test_lujy_pm_notes_prompt_uses_compact_grouped_company_guidance(self):
-        meeting = self.make_meeting(title="ScoutX planning")
-        meeting.meeting_type = MeetingType.LUJY_PM_NOTES
+    def test_compact_pm_notes_prompt_uses_compact_grouped_company_guidance(self):
+        meeting = self.make_meeting(title="Product planning")
+        meeting.meeting_type = MeetingType.COMPACT_PM_NOTES
 
         prompt = build_minutes_prompt(
             meeting,
-            "person_1: Bit68 recommends grouping the academy flow. person_2: Client wants chat buttons.",
+            "person_1: Vendor recommends grouping the academy flow. person_2: Client wants chat buttons.",
         )
 
-        self.assertIn("Lujy PM Notes", prompt)
+        self.assertIn("Compact PM Notes", prompt)
         self.assertIn("Generate refined PM conclusions", prompt)
         self.assertIn("Be summarized like Requirements Gathering output", prompt)
         self.assertIn("Group all related requirements under the same topic", prompt)
@@ -1147,20 +1148,20 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Risks:", prompt)
         self.assertIn("Open Points:", prompt)
 
-    def test_lujy_pm_notes_chunked_prompts_group_and_compact(self):
-        meeting = self.make_meeting(title="Long Lujy PM meeting")
-        meeting.meeting_type = MeetingType.LUJY_PM_NOTES
+    def test_compact_pm_notes_chunked_prompts_group_and_compact(self):
+        meeting = self.make_meeting(title="Long PM meeting")
+        meeting.meeting_type = MeetingType.COMPACT_PM_NOTES
 
-        final_prompt = build_lujy_project_manager_final_prompt(
+        final_prompt = build_compact_project_manager_final_prompt(
             meeting,
             "Chunk 1 notes:\nAcademy Flow\n- Add team filter.",
         )
-        compact_prompt = build_lujy_project_manager_compaction_prompt(
+        compact_prompt = build_compact_project_manager_compaction_prompt(
             meeting,
             "Meeting Details:\n\nDiscussion Points:\n\nAcademy Flow\n- Add filters.",
         )
 
-        self.assertIn("Create \"Lujy PM Notes\"", final_prompt)
+        self.assertIn("Create \"Compact PM Notes\"", final_prompt)
         self.assertIn("structured requirements/conclusions document", final_prompt)
         self.assertIn("useful conclusions, decisions, actionable requirements", final_prompt)
         self.assertIn("Do not scatter related requirements", final_prompt)
@@ -1172,13 +1173,13 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Move all risks to the final Risks section", compact_prompt)
         self.assertIn("Group all related requirements under the same topic", compact_prompt)
 
-    def test_lujy_pm_notes_is_hidden_from_web_dropdown(self):
+    def test_compact_pm_notes_is_hidden_from_web_dropdown(self):
         form = MeetingMinutesForm()
         choice_values = [value for value, _ in form.fields["meeting_type"].choices]
 
         self.assertIn(MeetingType.PROJECT_MANAGER_NOTES, choice_values)
         self.assertIn(MeetingType.MEETING_HEALTH_REPORT, choice_values)
-        self.assertNotIn(MeetingType.LUJY_PM_NOTES, choice_values)
+        self.assertNotIn(MeetingType.COMPACT_PM_NOTES, choice_values)
 
     def test_project_manager_compaction_prompt_preserves_information_with_word_cap(self):
         meeting = self.make_meeting(title="Long PM meeting")
@@ -1234,7 +1235,7 @@ class MeetingMinutesTests(TestCase):
         self.assertContains(response, "Extract meeting minutes")
         self.assertNotContains(response, "Rebuild messages and summaries")
         self.assertContains(response, "Paste in proposal generator")
-        self.assertContains(response, "proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/")
+        self.assertContains(response, "https://example.test/proposal/form/")
         self.assertContains(response, 'window.open(destination, "_blank"', html=False)
         self.assertNotContains(response, "window.location.href = destination")
         self.assertContains(response, "Customer portal needs approvals")
@@ -1243,7 +1244,7 @@ class MeetingMinutesTests(TestCase):
     def test_project_manager_notes_pdf_download(self):
         meeting = self.make_meeting(title="PM Notes")
         meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
-        meeting.minutes_text = "Meeting Details:\n\nDate: 2026-05-19\nTime: 10:00\nLocation/Platform: Google Meet\nAttendees:\n\nLujain\n\nDiscussion Points:\n\nAdmin Profile\n- Add an Admin Profile flow from the sidebar."
+        meeting.minutes_text = "Meeting Details:\n\nDate: 2026-05-19\nTime: 10:00\nLocation/Platform: Google Meet\nAttendees:\n\nAlex\n\nDiscussion Points:\n\nAdmin Profile\n- Add an Admin Profile flow from the sidebar."
         meeting.save(update_fields=["meeting_type", "minutes_text"])
         MeetingMinutesOutput.objects.create(
             meeting=meeting,
@@ -1273,7 +1274,7 @@ class MeetingMinutesTests(TestCase):
         response = self.client.get(f"/meetings/{meeting.id}/")
 
         self.assertNotContains(response, "Paste in proposal generator")
-        self.assertNotContains(response, "proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/")
+        self.assertNotContains(response, "https://example.test/proposal/form/")
 
     def test_process_meeting_outputs_creates_messages_summaries_and_title(self):
         meeting = self.make_meeting(title="")

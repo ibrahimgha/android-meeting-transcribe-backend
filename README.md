@@ -1,15 +1,43 @@
 # Meeting Transcribe Backend
 
-Django REST Framework backend for authenticated meeting recording sessions.
+Open-source Django and Django REST Framework backend for authenticated meeting recording, transcription, AI-generated meeting notes, and meeting health analytics.
 
-## What It Does
+This backend is designed to pair with a mobile meeting recorder. The mobile client uploads speaker-labeled audio segments, while the server stores meetings, queues transcription jobs, generates derived meeting outputs, and exposes a web portal for reviewing results.
 
-- Registers and authenticates users with DRF token auth.
-- Creates a meeting when the mobile app starts recording.
-- Ends the meeting when the mobile app stops recording.
-- Receives sequential audio chunks with client-provided speaker metadata.
-- Queues chunks in the database and transcribes them sequentially with OpenAI.
-- Provides an authenticated web page where a user can view meetings and extract meeting minutes.
+## Features
+
+- Token-authenticated REST API for mobile clients.
+- Meeting lifecycle endpoints for start, upload segments, end, and import existing recordings.
+- Sequential background worker for imports, transcription, meeting output generation, and meeting-minutes jobs.
+- OpenAI transcription support for uploaded audio segments.
+- Authenticated web portal for meeting review.
+- Browser playback for original audio segments.
+- Generated display messages with merged transcripts, detailed summaries, short summaries, and meeting titles.
+- Meeting-minutes extraction for requirements, follow-ups, draft delivery, and project-manager notes.
+- Meeting health reports with a score out of 10 and dashboard statistics.
+- Optional MCP server so agents can operate the tool through a controlled API.
+
+## Architecture
+
+```text
+Mobile app / web import
+        |
+        v
+Django REST API
+        |
+        v
+Database-backed queue
+        |
+        v
+Worker command: transcribe_segments
+        |
+        +-- import full recordings into audio segments
+        +-- transcribe audio segments with OpenAI
+        +-- build display messages, summaries, and titles
+        +-- generate queued meeting minutes and health reports
+```
+
+The queue is intentionally simple: jobs are stored in the database and processed sequentially by a long-running Django management command.
 
 ## Setup
 
@@ -19,14 +47,52 @@ python -m venv .venv
 Copy-Item .env.example .env
 ```
 
-Set `OPENAI_API_KEY` in `.env`, then run:
+Set at least `DJANGO_SECRET_KEY` and `OPENAI_API_KEY` in `.env`, then run:
 
 ```powershell
 .\.venv\Scripts\python.exe manage.py migrate
 .\.venv\Scripts\python.exe manage.py runserver
 ```
 
-## API
+Create a Django user through the admin, shell, or your own registration flow, then open:
+
+```text
+http://127.0.0.1:8000/meetings/
+```
+
+## Environment Variables
+
+| Variable | Purpose |
+| --- | --- |
+| `DJANGO_SECRET_KEY` | Django secret key. Required for production. |
+| `DJANGO_DEBUG` | Use `false` in production. |
+| `DJANGO_ALLOWED_HOSTS` | Comma-separated allowed hosts. |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated mobile/web origins. |
+| `OPENAI_API_KEY` | OpenAI API key used for transcription and analysis. |
+| `OPENAI_TRANSCRIBE_MODEL` | Audio transcription model. |
+| `OPENAI_MINUTES_MODEL` | Model used for meeting minutes and health reports. |
+| `OPENAI_MEETING_ANALYSIS_MODEL` | Model used for message grouping, summaries, and titles. |
+| `MAX_AUDIO_SEGMENT_BYTES` | Max single segment upload size. |
+| `MAX_IMPORT_RECORDING_BYTES` | Max full recording import size. |
+| `IMPORT_CHUNK_BYTES` | Browser chunk size for large uploads. |
+| `FFMPEG_BINARY` | Optional path to ffmpeg for recording imports. |
+| `MCP_AUTH_TOKEN` | Optional bearer token for MCP access. |
+| `MCP_DEFAULT_USERNAME` | Django username used by MCP tools. |
+| `MCP_PUBLIC_URL` | Public MCP endpoint URL. |
+| `PROPOSAL_GENERATOR_URL` | Optional URL for a downstream proposal generator. |
+| `PM_NOTES_PDF_AUTHOR` | Optional PDF metadata author for project-manager notes. |
+| `PM_NOTES_PDF_FOOTER_TEXT` | Optional footer text for project-manager notes PDFs. |
+| `DB_ENGINE`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` | Database configuration. SQLite is used by default. |
+
+## REST API
+
+Use token authentication:
+
+```text
+Authorization: Token <token>
+```
+
+Main endpoints:
 
 ```text
 POST /api/auth/register/
@@ -39,17 +105,12 @@ GET  /api/meetings/
 GET  /api/meetings/{meeting_id}/
 POST /api/meetings/{meeting_id}/segments/
 POST /api/meetings/{meeting_id}/end/
+POST /api/meetings/import/
 ```
 
-Use token auth:
+## Background Worker
 
-```text
-Authorization: Token <token>
-```
-
-## Transcription Worker
-
-Run one worker process for sequential processing:
+Run one worker process:
 
 ```powershell
 .\.venv\Scripts\python.exe manage.py transcribe_segments
@@ -61,42 +122,45 @@ For a one-shot local run:
 .\.venv\Scripts\python.exe manage.py transcribe_segments --once
 ```
 
-The default transcription model is `gpt-4o-mini-transcribe`. Override with `OPENAI_TRANSCRIBE_MODEL`.
-
-## Web Meeting Minutes
-
-Open `/meetings/` in a browser and log in with the same Django user used by the mobile app.
-Open a meeting detail page to review processed messages. Each displayed message includes:
-
-- The source audio segments with browser playback controls.
-- The merged full transcript.
-- A detailed English summary.
-- A 12-word-or-fewer English summary.
-
-On the meeting detail page, choose one of:
-
-- Requirement gathering
-- Requirement gathering minutes
-- Followup meeting
-- Draft delivery
-
-Then click **Extract meeting minutes**. The backend sends the meeting transcript to OpenAI and stores
-the generated Markdown minutes on the meeting. The default minutes model is `gpt-5.5`; override
-with `OPENAI_MINUTES_MODEL`.
-
-The Requirement gathering option generates only the final gathered requirements. It omits removed
-or superseded requirements and does not include meeting-minutes sections. Use Requirement gathering
-minutes when you want normal meeting minutes for a requirements discussion.
-
-After a meeting finishes transcribing, the transcription worker also asks OpenAI to combine segments
-into displayed messages, summarize each message, and generate a meeting title. The default model is
-`gpt-4o-mini`; override with `OPENAI_MEETING_ANALYSIS_MODEL`.
-
-To rebuild outputs manually:
+Backfill meeting health reports for completed meetings:
 
 ```powershell
-.\.venv\Scripts\python.exe manage.py process_meeting_outputs --latest --force
+.\.venv\Scripts\python.exe manage.py queue_health_reports --process
 ```
+
+## Web Portal
+
+The authenticated web portal supports:
+
+- importing previous recordings,
+- viewing meetings and transcribed audio segments,
+- playing source audio in the browser,
+- extracting saved meeting outputs by type,
+- downloading project-manager notes PDFs,
+- reviewing meeting health reports and dashboard statistics.
+
+Users can be granted access to all meetings through `UserWebSettings.can_view_all_meetings`.
+
+## MCP
+
+The optional MCP server exposes meeting operations to agents. Configure:
+
+```text
+MCP_AUTH_TOKEN=
+MCP_DEFAULT_USERNAME=
+MCP_PUBLIC_URL=
+```
+
+Then run the MCP service using your deployment process or the MCP server module.
+
+## Security Notes
+
+- Do not commit `.env`, `db.sqlite3`, uploaded media, static build output, or local virtual environments.
+- Rotate any API key that was ever committed to git history.
+- Use a strong `DJANGO_SECRET_KEY` in production.
+- Set `DJANGO_DEBUG=false` in production.
+- Restrict `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and MCP access for deployed environments.
+- Uploaded recordings and transcripts can contain sensitive information; store and retain them according to your privacy requirements.
 
 ## Tests
 

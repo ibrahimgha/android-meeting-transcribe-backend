@@ -23,8 +23,8 @@ BODY_MARGIN_X = 37
 TOP_MARGIN = 91
 BOTTOM_MARGIN = 78
 LOGO_DIR = Path(settings.BASE_DIR) / "meetings" / "static" / "meetings"
-HEADER_LOGO_PATH = LOGO_DIR / "bit68-logo.jpg"
-FOOTER_LOGO_PATH = LOGO_DIR / "bit68-logo-footer.jpg"
+HEADER_LOGO_PATH = LOGO_DIR / "organization-logo.jpg"
+FOOTER_LOGO_PATH = LOGO_DIR / "organization-logo-footer.jpg"
 MUTED = colors.HexColor("#5b6475")
 LIGHT_LINE = colors.HexColor("#d9e0ec")
 LIGHT_BG = colors.HexColor("#f7f9fd")
@@ -43,7 +43,7 @@ def build_pm_notes_pdf(meeting: Meeting, *, minutes_text: str | None = None) -> 
         topMargin=TOP_MARGIN,
         bottomMargin=BOTTOM_MARGIN,
         title=f"{meeting.title or 'Meeting'} - Project Manager Notes",
-        author="Bit68",
+        author=settings.PM_NOTES_PDF_AUTHOR,
     )
     styles = build_styles()
     story = build_story(meeting, styles, minutes_text=minutes_text)
@@ -302,7 +302,8 @@ def draw_footer(canvas, meeting: Meeting) -> None:
     draw_logo_image(canvas, FOOTER_LOGO_PATH, 36, 35, 39, 18)
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(MUTED)
-    canvas.drawString(36, 20, "www.bit68.com")
+    if settings.PM_NOTES_PDF_FOOTER_TEXT:
+        canvas.drawString(36, 20, settings.PM_NOTES_PDF_FOOTER_TEXT)
 
     canvas.drawRightString(width - 37, 45, f"Date issued: {issued_at}")
     canvas.drawRightString(width - 37, 32, f"Meeting date: {meeting_date}")

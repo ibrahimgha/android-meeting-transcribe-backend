@@ -243,7 +243,7 @@ async def extract_meeting_minutes(meeting_id: str, meeting_type: str, wait: bool
 
 @mcp.tool()
 async def get_project_manager_notes_pdf(meeting_id: str, meeting_type: str = "") -> dict:
-    """Return a PM notes PDF as base64 content. meeting_type may be project_manager_notes or lujy_pm_notes."""
+    """Return a PM notes PDF as base64 content. meeting_type may be project_manager_notes or compact_pm_notes."""
     return await sync_to_async(mcp_api.get_project_manager_notes_pdf, thread_sensitive=True)(
         meeting_id,
         meeting_type=meeting_type,

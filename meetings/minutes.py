@@ -28,8 +28,8 @@ class MinutesResult:
 
 
 PM_NOTES_COMPACT_WORD_LIMIT = 1500
-LUJY_PM_NOTES_COMPACT_WORD_LIMIT = 900
-PM_NOTES_TYPES = {MeetingType.PROJECT_MANAGER_NOTES, MeetingType.LUJY_PM_NOTES}
+COMPACT_PM_NOTES_WORD_LIMIT = 900
+PM_NOTES_TYPES = {MeetingType.PROJECT_MANAGER_NOTES, MeetingType.COMPACT_PM_NOTES}
 
 
 class OpenAIMinutesClient:
@@ -79,7 +79,7 @@ class OpenAIMinutesClient:
                     },
                     {
                         "role": "user",
-                        "content": build_lujy_project_manager_chunk_prompt(
+                        "content": build_compact_project_manager_chunk_prompt(
                             meeting,
                             chunk,
                             chunk_index=index,
@@ -105,7 +105,7 @@ class OpenAIMinutesClient:
                 },
                 {
                     "role": "user",
-                    "content": build_lujy_project_manager_final_prompt(meeting, combined_notes),
+                    "content": build_compact_project_manager_final_prompt(meeting, combined_notes),
                 },
             ],
         )
@@ -117,7 +117,7 @@ class OpenAIMinutesClient:
             "final_response": final_raw,
             "compacted": False,
         }
-        if word_count(text) > LUJY_PM_NOTES_COMPACT_WORD_LIMIT:
+        if word_count(text) > COMPACT_PM_NOTES_WORD_LIMIT:
             compact_response = self.client.chat.completions.create(
                 **chat_completion_options(self.model, temperature=0.2),
                 messages=[
@@ -127,7 +127,7 @@ class OpenAIMinutesClient:
                     },
                     {
                         "role": "user",
-                        "content": build_lujy_project_manager_compaction_prompt(meeting, text),
+                        "content": build_compact_project_manager_compaction_prompt(meeting, text),
                     },
                 ],
             )
@@ -395,7 +395,7 @@ def build_minutes_prompt(meeting: Meeting, transcript: str) -> str:
     if meeting.meeting_type == MeetingType.REQUIREMENT_GATHERING:
         return build_requirements_prompt(meeting, transcript, meeting_type)
     if meeting.meeting_type in PM_NOTES_TYPES:
-        return build_lujy_project_manager_notes_prompt(meeting, transcript, meeting_type)
+        return build_compact_project_manager_notes_prompt(meeting, transcript, meeting_type)
     if meeting.meeting_type == MeetingType.MEETING_HEALTH_REPORT:
         return build_meeting_health_report_prompt(meeting, transcript, meeting_type)
 
@@ -597,7 +597,7 @@ Draft notes:
 """
 
 
-def build_lujy_project_manager_chunk_prompt(
+def build_compact_project_manager_chunk_prompt(
     meeting: Meeting,
     transcript_chunk: str,
     *,
@@ -619,7 +619,7 @@ Rules:
 - Omit filler, repetition, negotiation wording, explanations of why someone thinks something, and anything that does not change the final project understanding.
 - Keep enough context to let the final pass group related requirements under one topic.
 - If multiple lines refer to the same topic, keep them adjacent under one heading instead of scattering them.
-- The transcript may use generic labels such as person_1 or person_2. Do not preserve those labels. Extract the real company, vendor, client, or team name when the chunk makes it clear. If the company name is not clear, use the role side only when useful, such as Client, Bit68, Vendor, or Product team.
+- The transcript may use generic labels such as person_1 or person_2. Do not preserve those labels. Extract the real company, vendor, client, or team name when the chunk makes it clear. If the company name is not clear, use the role side only when useful, such as Client, Vendor, or Product team.
 - Do not invent a company name. If attribution is not needed, omit attribution entirely.
 - Include uncertain or mistranscribed terms when the intended meaning is reasonably clear, and mark unclear wording as unclear.
 - If a point is contradicted or removed later inside this same chunk, keep only the later/final direction.
@@ -633,7 +633,7 @@ Transcript chunk:
 """
 
 
-def build_lujy_project_manager_final_prompt(meeting: Meeting, extracted_chunk_notes: str) -> str:
+def build_compact_project_manager_final_prompt(meeting: Meeting, extracted_chunk_notes: str) -> str:
     meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
     output_name = project_manager_output_name(meeting)
     return f"""Meeting title: {meeting.title or "Untitled meeting"}
@@ -662,7 +662,7 @@ Critical rules:
 - Gather all risks into the final Risks section.
 - Gather all open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups into the final Open Points section.
 - Do not write generic transcript labels such as person_1, person_2, speaker_1, or speaker_2.
-- When attribution matters, use actual company, vendor, client, or team names inferred from the transcript or extracted notes. If the actual company name is not clear, use Client, Bit68, Vendor, Product team, or Not specified as appropriate.
+- When attribution matters, use actual company, vendor, client, or team names inferred from the transcript or extracted notes. If the actual company name is not clear, use Client, Vendor, Product team, or Not specified as appropriate.
 - Do not invent attendees or company names. If attendees are unclear, write "Not specified".
 - If something is discussed and later removed, omit it completely.
 - If two points contradict each other, keep the later one and omit the earlier one.
@@ -722,7 +722,7 @@ Extracted notes:
 """
 
 
-def build_lujy_project_manager_compaction_prompt(meeting: Meeting, draft_notes: str) -> str:
+def build_compact_project_manager_compaction_prompt(meeting: Meeting, draft_notes: str) -> str:
     meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
     output_name = project_manager_output_name(meeting)
     return f"""Meeting title: {meeting.title or "Untitled meeting"}
@@ -746,7 +746,7 @@ Rules:
 - Move all risks to the final Risks section.
 - Move all open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups to the final Open Points section.
 - Do not leave risks or open points under individual discussion topics.
-- Do not output person_1, person_2, speaker_1, or speaker_2. Use real company/team names if clear; otherwise omit attribution or use Client, Bit68, Vendor, Product team, or Not specified.
+- Do not output person_1, person_2, speaker_1, or speaker_2. Use real company/team names if clear; otherwise omit attribution or use Client, Vendor, Product team, or Not specified.
 - Keep date and time as:
   - Date: {meeting_date}
   - Time: {meeting_time}
@@ -757,12 +757,12 @@ Draft notes:
 
 
 def project_manager_output_name(meeting: Meeting) -> str:
-    if meeting.meeting_type == MeetingType.LUJY_PM_NOTES:
-        return "Lujy PM Notes"
+    if meeting.meeting_type == MeetingType.COMPACT_PM_NOTES:
+        return "Compact PM Notes"
     return "Project Manager Notes"
 
 
-def build_lujy_project_manager_notes_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
+def build_compact_project_manager_notes_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
     meeting_date, meeting_time = meeting_datetime_for_prompt(meeting)
     output_name = project_manager_output_name(meeting)
     return f"""Meeting type: {meeting_type}
@@ -789,7 +789,7 @@ Instructions:
 - Gather all open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups into the final Open Points section.
 - Omit transcript process details: who said what, how the discussion evolved, examples that add no new requirement, repeated clarifications, and negotiation wording.
 - Do not write person_1, person_2, speaker_1, or speaker_2 anywhere.
-- Use actual company, vendor, client, or team names when they can be inferred from the transcript. If the actual name is not clear, use Client, Bit68, Vendor, Product team, or Not specified only when attribution matters.
+- Use actual company, vendor, client, or team names when they can be inferred from the transcript. If the actual name is not clear, use Client, Vendor, Product team, or Not specified only when attribution matters.
 - If attribution does not matter to the requirement, omit attribution.
 - Do not invent attendees or company names.
 - If something is discussed and later removed, omit it completely.

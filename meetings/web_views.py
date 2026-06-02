@@ -113,6 +113,7 @@ class MeetingDetailView(LoginRequiredMixin, DetailView):
         context["pm_notes_types"] = list(PM_NOTES_TYPES)
         context["meeting_progress"] = build_meeting_progress(self.object)
         context["can_view_all_meetings"] = can_view_all_meetings(self.request.user)
+        context["proposal_generator_url"] = settings.PROPOSAL_GENERATOR_URL
         return context
 
 

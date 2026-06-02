@@ -156,5 +156,9 @@ MCP_PUBLIC_URL = os.environ.get(
     "http://127.0.0.1:9121/mcp",
 )
 
+PROPOSAL_GENERATOR_URL = os.environ.get("PROPOSAL_GENERATOR_URL", "")
+PM_NOTES_PDF_AUTHOR = os.environ.get("PM_NOTES_PDF_AUTHOR", "Meeting Transcribe")
+PM_NOTES_PDF_FOOTER_TEXT = os.environ.get("PM_NOTES_PDF_FOOTER_TEXT", "")
+
 LOGIN_REDIRECT_URL = "/meetings/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"

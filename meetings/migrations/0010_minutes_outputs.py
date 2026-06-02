@@ -44,13 +44,13 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='meeting',
             name='meeting_type',
-            field=models.CharField(blank=True, choices=[('requirement_gathering', 'Requirement gathering'), ('requirement_gathering_minutes', 'Requirement gathering minutes'), ('followup_meeting', 'Followup meeting'), ('draft_delivery', 'Draft delivery'), ('project_manager_notes', 'Project manager notes'), ('lujy_pm_notes', 'Lujy PM notes')], max_length=32),
+            field=models.CharField(blank=True, choices=[('requirement_gathering', 'Requirement gathering'), ('requirement_gathering_minutes', 'Requirement gathering minutes'), ('followup_meeting', 'Followup meeting'), ('draft_delivery', 'Draft delivery'), ('project_manager_notes', 'Project manager notes'), ('compact_pm_notes', 'Compact PM notes')], max_length=32),
         ),
         migrations.CreateModel(
             name='MeetingMinutesOutput',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('meeting_type', models.CharField(choices=[('requirement_gathering', 'Requirement gathering'), ('requirement_gathering_minutes', 'Requirement gathering minutes'), ('followup_meeting', 'Followup meeting'), ('draft_delivery', 'Draft delivery'), ('project_manager_notes', 'Project manager notes'), ('lujy_pm_notes', 'Lujy PM notes')], max_length=32)),
+                ('meeting_type', models.CharField(choices=[('requirement_gathering', 'Requirement gathering'), ('requirement_gathering_minutes', 'Requirement gathering minutes'), ('followup_meeting', 'Followup meeting'), ('draft_delivery', 'Draft delivery'), ('project_manager_notes', 'Project manager notes'), ('compact_pm_notes', 'Compact PM notes')], max_length=32)),
                 ('text', models.TextField(blank=True)),
                 ('model', models.CharField(blank=True, max_length=80)),
                 ('response', models.JSONField(blank=True, default=dict)),

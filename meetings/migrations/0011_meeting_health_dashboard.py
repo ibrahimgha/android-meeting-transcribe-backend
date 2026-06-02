@@ -18,11 +18,11 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='meeting',
             name='meeting_type',
-            field=models.CharField(blank=True, choices=[('requirement_gathering', 'Requirement gathering'), ('requirement_gathering_minutes', 'Requirement gathering minutes'), ('followup_meeting', 'Followup meeting'), ('draft_delivery', 'Draft delivery'), ('project_manager_notes', 'Project manager notes'), ('meeting_health_report', 'Meeting health report'), ('lujy_pm_notes', 'Lujy PM notes')], max_length=32),
+            field=models.CharField(blank=True, choices=[('requirement_gathering', 'Requirement gathering'), ('requirement_gathering_minutes', 'Requirement gathering minutes'), ('followup_meeting', 'Followup meeting'), ('draft_delivery', 'Draft delivery'), ('project_manager_notes', 'Project manager notes'), ('meeting_health_report', 'Meeting health report'), ('compact_pm_notes', 'Compact PM notes')], max_length=32),
         ),
         migrations.AlterField(
             model_name='meetingminutesoutput',
             name='meeting_type',
-            field=models.CharField(choices=[('requirement_gathering', 'Requirement gathering'), ('requirement_gathering_minutes', 'Requirement gathering minutes'), ('followup_meeting', 'Followup meeting'), ('draft_delivery', 'Draft delivery'), ('project_manager_notes', 'Project manager notes'), ('meeting_health_report', 'Meeting health report'), ('lujy_pm_notes', 'Lujy PM notes')], max_length=32),
+            field=models.CharField(choices=[('requirement_gathering', 'Requirement gathering'), ('requirement_gathering_minutes', 'Requirement gathering minutes'), ('followup_meeting', 'Followup meeting'), ('draft_delivery', 'Draft delivery'), ('project_manager_notes', 'Project manager notes'), ('meeting_health_report', 'Meeting health report'), ('compact_pm_notes', 'Compact PM notes')], max_length=32),
         ),
     ]

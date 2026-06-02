@@ -149,7 +149,7 @@
                 · {{ selected_minutes_output.model }}
             {% endif %}
         </div>
-        {% if selected_minutes_output.meeting_type == "requirement_gathering" %}
+        {% if selected_minutes_output.meeting_type == "requirement_gathering" and proposal_generator_url %}
             <div class="actions">
                 <textarea id="proposal-requirements-text" class="clipboard-source" readonly>{{ selected_minutes_output.text }}</textarea>
                 <button id="paste-in-proposal-generator" type="button">
@@ -278,12 +278,12 @@
         window.setTimeout(poll, 2000);
     })();
 </script>
-{% if selected_minutes_output and selected_minutes_output.text and selected_minutes_output.meeting_type == "requirement_gathering" %}
+{% if selected_minutes_output and selected_minutes_output.text and selected_minutes_output.meeting_type == "requirement_gathering" and proposal_generator_url %}
     <script>
         (function () {
             const button = document.getElementById("paste-in-proposal-generator");
             const source = document.getElementById("proposal-requirements-text");
-            const destination = "https://proposal-engine-vm8.bit68-infra.com/requirements-to-pdf/form/";
+            const destination = "{{ proposal_generator_url|escapejs }}";
 
             if (!button || !source) {
                 return;
