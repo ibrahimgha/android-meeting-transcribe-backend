@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -13,7 +14,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
 from django.views import View
-from django.views.generic import DetailView, ListView
+from django.views.generic import DetailView, ListView, TemplateView
 
 from .forms import MeetingImportForm, MeetingMinutesForm
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
@@ -31,7 +32,11 @@ from .models import (
     MeetingStatus,
     MeetingType,
     SegmentStatus,
+    UserWebSettings,
 )
+
+
+HEALTH_SCORE_PATTERN = re.compile(r"Health Score:\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*10", re.IGNORECASE)
 
 
 class MeetingListView(LoginRequiredMixin, ListView):
@@ -40,7 +45,7 @@ class MeetingListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         return (
-            Meeting.objects.filter(user=self.request.user)
+            visible_meetings_for_user(self.request.user)
             .annotate(
                 segment_count=Count("segments"),
                 completed_transcription_count=Count(
@@ -48,7 +53,8 @@ class MeetingListView(LoginRequiredMixin, ListView):
                     filter=Q(segments__transcription_text__gt=""),
                 ),
             )
-            .prefetch_related("segments")
+            .select_related("user")
+            .prefetch_related("segments", "minutes_outputs")
             .order_by("-started_at")
         )
 
@@ -56,6 +62,7 @@ class MeetingListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         context["import_form"] = MeetingImportForm()
         context["import_chunk_bytes"] = settings.IMPORT_CHUNK_BYTES
+        context["can_view_all_meetings"] = can_view_all_meetings(self.request.user)
         return context
 
 
@@ -65,7 +72,7 @@ class MeetingDetailView(LoginRequiredMixin, DetailView):
 
     def get_queryset(self):
         return (
-            Meeting.objects.filter(user=self.request.user)
+            visible_meetings_for_user(self.request.user)
             .annotate(
                 segment_count=Count("segments"),
                 completed_transcription_count=Count(
@@ -73,6 +80,7 @@ class MeetingDetailView(LoginRequiredMixin, DetailView):
                     filter=Q(segments__transcription_text__gt=""),
                 ),
             )
+            .select_related("user")
             .prefetch_related(
                 "segments",
                 "imports",
@@ -104,6 +112,7 @@ class MeetingDetailView(LoginRequiredMixin, DetailView):
         ).order_by("meeting_type")
         context["pm_notes_types"] = list(PM_NOTES_TYPES)
         context["meeting_progress"] = build_meeting_progress(self.object)
+        context["can_view_all_meetings"] = can_view_all_meetings(self.request.user)
         return context
 
 
@@ -290,7 +299,7 @@ class FinishChunkedImportView(LoginRequiredMixin, View):
 
 class GenerateMeetingMinutesView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        meeting = get_object_or_404(Meeting, pk=pk, user=request.user)
+        meeting = get_visible_meeting_or_404(request.user, pk)
         form = MeetingMinutesForm(request.POST, instance=meeting)
         if not form.is_valid():
             messages.error(request, "Choose a meeting type before extracting minutes.")
@@ -317,7 +326,7 @@ class GenerateMeetingMinutesView(LoginRequiredMixin, View):
 
 class MeetingMinutesPdfView(LoginRequiredMixin, View):
     def get(self, request, pk):
-        meeting = get_object_or_404(Meeting, pk=pk, user=request.user)
+        meeting = get_visible_meeting_or_404(request.user, pk)
         requested_type = request.GET.get("minutes_type") or meeting.meeting_type
         if requested_type not in PM_NOTES_TYPES:
             raise Http404("Project manager notes PDF is not available for this meeting.")
@@ -338,7 +347,7 @@ class MeetingMinutesPdfView(LoginRequiredMixin, View):
 
 class MeetingProgressView(LoginRequiredMixin, View):
     def get(self, request, pk):
-        meeting = get_object_or_404(Meeting, pk=pk, user=request.user)
+        meeting = get_visible_meeting_or_404(request.user, pk)
         return JsonResponse(build_meeting_progress(meeting))
 
 
@@ -373,7 +382,7 @@ def safe_filename(value: str) -> str:
 
 class GenerateMeetingOutputsView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        meeting = get_object_or_404(Meeting, pk=pk, user=request.user)
+        meeting = get_visible_meeting_or_404(request.user, pk)
         try:
             process_meeting_outputs(meeting, force=True)
         except Exception as exc:
@@ -381,6 +390,50 @@ class GenerateMeetingOutputsView(LoginRequiredMixin, View):
         else:
             messages.success(request, "Messages, summaries, and title rebuilt.")
         return redirect("web-meeting-detail", pk=meeting.pk)
+
+
+class MeetingHealthDashboardView(LoginRequiredMixin, TemplateView):
+    template_name = "meetings/meeting_health_dashboard.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if not can_view_all_meetings(request.user):
+            raise Http404("Meeting health dashboard is not available.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        meetings = (
+            visible_meetings_for_user(self.request.user)
+            .select_related("user")
+            .prefetch_related("minutes_outputs")
+            .annotate(
+                segment_count=Count("segments"),
+                completed_transcription_count=Count(
+                    "segments",
+                    filter=Q(segments__transcription_text__gt=""),
+                ),
+            )
+            .order_by("-started_at")
+        )
+        rows = [build_health_dashboard_row(meeting) for meeting in meetings]
+        scored_rows = [row for row in rows if row["score"] is not None]
+        scores = [row["score"] for row in scored_rows]
+        context.update(
+            {
+                "rows": rows,
+                "scored_rows": scored_rows,
+                "total_meetings": len(rows),
+                "reported_count": len(scored_rows),
+                "missing_count": len(rows) - len(scored_rows),
+                "average_score": round(sum(scores) / len(scores), 1) if scores else None,
+                "high_score_count": len([score for score in scores if score >= 8]),
+                "medium_score_count": len([score for score in scores if 5 <= score < 8]),
+                "low_score_count": len([score for score in scores if score < 5]),
+                "lowest_rows": sorted(scored_rows, key=lambda row: row["score"])[:5],
+                "highest_rows": sorted(scored_rows, key=lambda row: row["score"], reverse=True)[:5],
+            }
+        )
+        return context
 
 
 def build_meeting_progress(meeting: Meeting) -> dict:
@@ -585,3 +638,64 @@ def selected_minutes_output(meeting: Meeting, requested_type: str = "") -> Meeti
         key=lambda output: output.generated_at or output.updated_at,
         reverse=True,
     )[0] if completed_outputs else None
+
+
+def can_view_all_meetings(user) -> bool:
+    if not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    return UserWebSettings.objects.filter(
+        user=user,
+        can_view_all_meetings=True,
+    ).exists()
+
+
+def visible_meetings_for_user(user):
+    if can_view_all_meetings(user):
+        return Meeting.objects.all()
+    return Meeting.objects.filter(user=user)
+
+
+def get_visible_meeting_or_404(user, pk):
+    return get_object_or_404(visible_meetings_for_user(user), pk=pk)
+
+
+def build_health_dashboard_row(meeting: Meeting) -> dict:
+    output = next(
+        (
+            item
+            for item in meeting.minutes_outputs.all()
+            if item.meeting_type == MeetingType.MEETING_HEALTH_REPORT
+        ),
+        None,
+    )
+    score = extract_health_score(output.text) if output and output.text else None
+    is_processing = bool(
+        output
+        and output.status in {MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING}
+    )
+    return {
+        "meeting": meeting,
+        "owner": meeting.user,
+        "health_output": output,
+        "score": score,
+        "health_report_is_processing": is_processing,
+        "segment_count": getattr(meeting, "segment_count", meeting.segments.count()),
+        "completed_transcription_count": getattr(
+            meeting,
+            "completed_transcription_count",
+            meeting.segments.exclude(transcription_text="").count(),
+        ),
+    }
+
+
+def extract_health_score(text: str) -> float | None:
+    match = HEALTH_SCORE_PATTERN.search(text or "")
+    if not match:
+        return None
+    try:
+        score = float(match.group(1))
+    except ValueError:
+        return None
+    return max(0.0, min(10.0, score))

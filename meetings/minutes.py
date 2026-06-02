@@ -335,6 +335,8 @@ def build_minutes_prompt(meeting: Meeting, transcript: str) -> str:
         return build_requirements_prompt(meeting, transcript, meeting_type)
     if meeting.meeting_type in PM_NOTES_TYPES:
         return build_lujy_project_manager_notes_prompt(meeting, transcript, meeting_type)
+    if meeting.meeting_type == MeetingType.MEETING_HEALTH_REPORT:
+        return build_meeting_health_report_prompt(meeting, transcript, meeting_type)
 
     type_guidance = {
         "requirement_gathering_minutes": (
@@ -883,6 +885,49 @@ Instructions:
 - If one requirement contradicts another, keep only the more recent requirement and omit the older conflicting requirement completely.
 - Requirements must be written as clear product or business requirements, not as notes about who said what.
 - Use only information supported by the transcript after applying the removal and recency rules above.
+
+Transcript:
+{transcript}
+"""
+
+
+def build_meeting_health_report_prompt(meeting: Meeting, transcript: str, meeting_type: str) -> str:
+    return f"""Meeting type: {meeting_type}
+Meeting title: {meeting.title or "Untitled meeting"}
+Started at: {meeting.started_at.isoformat()}
+Ended at: {meeting.ended_at.isoformat() if meeting.ended_at else "Not ended"}
+
+Instructions:
+- This is a transcribed meeting and may contain transcription mistakes. Deduce intended wording only when reasonably clear.
+- Produce a meeting health report that evaluates whether the meeting was effective, actionable, and well-run.
+- Output must start with exactly one parseable score line in this format: Health Score: X/10
+- X must be a number from 0 to 10. Decimals are allowed, for example 7.5/10.
+- Score based only on evidence in the transcript.
+- Penalize meetings that are unfocused, repetitive, unresolved, missing decisions, missing owners, missing next steps, or dominated by unclear discussion.
+- Reward meetings that have a clear objective, concrete decisions, explicit requirements, aligned stakeholders, clear risks/open points, owners, and next steps.
+- Do not summarize the transcript chronologically.
+- Keep the report concise and practical.
+- Use this exact structure:
+
+Health Score: X/10
+
+Overall Assessment:
+[2-4 sentences explaining the score.]
+
+What Worked:
+- [Concrete positive signal from the meeting.]
+
+Issues:
+- [Concrete health issue, if any. If none are clear, write "Not specified".]
+
+Decisions and Actionability:
+- [State whether the meeting produced clear decisions, owners, and next steps.]
+
+Risks and Open Points:
+- [List unresolved items, missing owners, dependencies, or project risks. If none are clear, write "Not specified".]
+
+Recommended Follow-up:
+- [Specific next action to improve project clarity or execution.]
 
 Transcript:
 {transcript}

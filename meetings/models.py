@@ -36,6 +36,7 @@ class MeetingType(models.TextChoices):
     FOLLOWUP_MEETING = "followup_meeting", "Followup meeting"
     DRAFT_DELIVERY = "draft_delivery", "Draft delivery"
     PROJECT_MANAGER_NOTES = "project_manager_notes", "Project manager notes"
+    MEETING_HEALTH_REPORT = "meeting_health_report", "Meeting health report"
     LUJY_PM_NOTES = "lujy_pm_notes", "Lujy PM notes"
 
 
@@ -61,6 +62,7 @@ class UserWebSettings(models.Model):
         related_name="web_settings",
     )
     force_password_change = models.BooleanField(default=True)
+    can_view_all_meetings = models.BooleanField(default=False)
     password_changed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

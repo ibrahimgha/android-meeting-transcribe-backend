@@ -171,6 +171,6 @@ class MeetingMinutesOutputAdmin(admin.ModelAdmin):
 
 @admin.register(UserWebSettings)
 class UserWebSettingsAdmin(admin.ModelAdmin):
-    list_display = ["user", "force_password_change", "password_changed_at", "updated_at"]
-    list_filter = ["force_password_change", "password_changed_at"]
+    list_display = ["user", "force_password_change", "can_view_all_meetings", "password_changed_at", "updated_at"]
+    list_filter = ["force_password_change", "can_view_all_meetings", "password_changed_at"]
     search_fields = ["user__username", "user__email"]

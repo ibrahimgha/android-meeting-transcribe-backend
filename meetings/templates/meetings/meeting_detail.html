@@ -9,6 +9,9 @@
         <h1>{{ meeting.title|default:"Mobile meeting" }}</h1>
         <p class="subtitle">
             {{ meeting.started_at|date:"Y-m-d H:i" }}
+            {% if can_view_all_meetings %}
+                &middot; Owner: {{ meeting.user.username }}
+            {% endif %}
             {% if meeting.ended_at %}
                 - {{ meeting.ended_at|date:"H:i" }}
             {% endif %}
@@ -18,10 +21,15 @@
             · Message processing: {{ meeting.get_output_status_display }}
         </p>
     </div>
-    <form class="logout-form" method="post" action="{% url 'logout' %}">
-        {% csrf_token %}
-        <button class="secondary" type="submit">Log out</button>
-    </form>
+    <div class="actions">
+        {% if can_view_all_meetings %}
+            <a class="button secondary" href="{% url 'web-health-dashboard' %}">Health dashboard</a>
+        {% endif %}
+        <form class="logout-form" method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button class="secondary" type="submit">Log out</button>
+        </form>
+    </div>
 </header>
 
 {% if messages %}

@@ -50,6 +50,7 @@ from .models import (
 from .openai_utils import chat_completion_options
 from .postprocessing import MessageDraft, TextResult, process_meeting_outputs
 from .transcription import TranscriptionResult, claim_next_pending_segment, process_next_pending_segment
+from .web_views import can_view_all_meetings, extract_health_score
 
 User = get_user_model()
 
@@ -490,6 +491,14 @@ class MeetingMcpApiTests(TestCase):
             },
             type_payload["meeting_types"],
         )
+        self.assertIn(
+            {
+                "value": MeetingType.MEETING_HEALTH_REPORT,
+                "label": "Meeting health report",
+                "supports_pdf": False,
+            },
+            type_payload["meeting_types"],
+        )
         self.assertNotIn(
             MeetingType.LUJY_PM_NOTES,
             [item["value"] for item in type_payload["meeting_types"]],
@@ -661,6 +670,99 @@ class MeetingMinutesTests(TestCase):
         self.assertContains(response, own_meeting.title)
         self.assertNotContains(response, "Other meeting")
         self.assertContains(response, "Import a previous recording")
+
+    def test_regular_web_user_cannot_access_other_meetings_or_health_dashboard(self):
+        other_meeting = self.make_meeting(user=self.other_user, title="Other meeting")
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        detail_response = self.client.get(f"/meetings/{other_meeting.id}/")
+        dashboard_response = self.client.get("/meetings/health/")
+
+        self.assertFalse(can_view_all_meetings(self.user))
+        self.assertEqual(detail_response.status_code, 404)
+        self.assertEqual(dashboard_response.status_code, 404)
+
+    def test_can_view_all_meetings_permission_shows_everyones_meetings_and_dashboard(self):
+        own_meeting = self.make_meeting(title="Own meeting")
+        other_meeting = self.make_meeting(user=self.other_user, title="Other meeting")
+        UserWebSettings.objects.filter(user=self.user).update(can_view_all_meetings=True)
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        list_response = self.client.get("/meetings/")
+        other_detail_response = self.client.get(f"/meetings/{other_meeting.id}/")
+        dashboard_response = self.client.get("/meetings/health/")
+
+        self.user.refresh_from_db()
+        self.assertTrue(can_view_all_meetings(self.user))
+        self.assertContains(list_response, "All meetings")
+        self.assertContains(list_response, own_meeting.title)
+        self.assertContains(list_response, other_meeting.title)
+        self.assertContains(list_response, "Owner: other-web-user")
+        self.assertContains(list_response, "Health dashboard")
+        self.assertContains(other_detail_response, other_meeting.title)
+        self.assertContains(other_detail_response, "Owner: other-web-user")
+        self.assertContains(dashboard_response, "Meeting health dashboard")
+        self.assertContains(dashboard_response, other_meeting.title)
+
+    def test_health_dashboard_summarizes_scores_across_visible_meetings(self):
+        high_meeting = self.make_meeting(title="Healthy meeting")
+        low_meeting = self.make_meeting(user=self.other_user, title="Weak meeting")
+        missing_meeting = self.make_meeting(title="Unscored meeting")
+        UserWebSettings.objects.filter(user=self.user).update(can_view_all_meetings=True)
+        MeetingMinutesOutput.objects.create(
+            meeting=high_meeting,
+            meeting_type=MeetingType.MEETING_HEALTH_REPORT,
+            text="Health Score: 8/10\n\nOverall Assessment:\nClear decisions.",
+            status=MeetingMinutesStatus.COMPLETE,
+            generated_at=timezone.now(),
+        )
+        MeetingMinutesOutput.objects.create(
+            meeting=low_meeting,
+            meeting_type=MeetingType.MEETING_HEALTH_REPORT,
+            text="Health Score: 4/10\n\nOverall Assessment:\nNo owners.",
+            status=MeetingMinutesStatus.COMPLETE,
+            generated_at=timezone.now(),
+        )
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.get("/meetings/health/")
+
+        self.assertContains(response, "Healthy meeting")
+        self.assertContains(response, "Weak meeting")
+        self.assertContains(response, "Unscored meeting")
+        self.assertEqual(response.context["total_meetings"], 3)
+        self.assertEqual(response.context["reported_count"], 2)
+        self.assertEqual(response.context["missing_count"], 1)
+        self.assertEqual(response.context["average_score"], 6.0)
+        self.assertEqual(response.context["high_score_count"], 1)
+        self.assertEqual(response.context["low_score_count"], 1)
+        self.assertEqual(extract_health_score("Health Score: 11/10"), 10.0)
+
+        missing_row = next(
+            row for row in response.context["rows"]
+            if row["meeting"].id == missing_meeting.id
+        )
+        self.assertFalse(missing_row["health_report_is_processing"])
+
+    def test_can_view_all_meetings_user_can_queue_health_report_for_other_user(self):
+        other_meeting = self.make_meeting(user=self.other_user, title="Other meeting")
+        UserWebSettings.objects.filter(user=self.user).update(can_view_all_meetings=True)
+        self.client.login(username=self.user.username, password="strong-password-123")
+
+        response = self.client.post(
+            f"/meetings/{other_meeting.id}/minutes/",
+            {"meeting_type": MeetingType.MEETING_HEALTH_REPORT},
+        )
+
+        other_meeting.refresh_from_db()
+        output = MeetingMinutesOutput.objects.get(
+            meeting=other_meeting,
+            meeting_type=MeetingType.MEETING_HEALTH_REPORT,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"minutes_type={MeetingType.MEETING_HEALTH_REPORT}", response["Location"])
+        self.assertEqual(other_meeting.meeting_type, MeetingType.MEETING_HEALTH_REPORT)
+        self.assertEqual(output.status, MeetingMinutesStatus.PENDING)
 
     def test_web_import_upload_redirects_to_detail_and_queues_job(self):
         self.client.login(username=self.user.username, password="strong-password-123")
@@ -915,6 +1017,21 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Focus on business goals, user needs", prompt)
         self.assertIn("may contain transcription mistakes", prompt)
 
+    def test_meeting_health_report_prompt_requires_parseable_score(self):
+        meeting = self.make_meeting(title="Health check")
+        meeting.meeting_type = MeetingType.MEETING_HEALTH_REPORT
+
+        prompt = build_minutes_prompt(
+            meeting,
+            "person_1: No decision was made. person_2: We still need an owner.",
+        )
+
+        self.assertIn("Health Score: X/10", prompt)
+        self.assertIn("Score based only on evidence in the transcript", prompt)
+        self.assertIn("missing decisions, missing owners, missing next steps", prompt)
+        self.assertIn("Risks and Open Points:", prompt)
+        self.assertIn("Recommended Follow-up:", prompt)
+
     def test_project_manager_notes_prompt_matches_requested_format(self):
         meeting = self.make_meeting(title="ScoutX planning")
         meeting.meeting_type = MeetingType.PROJECT_MANAGER_NOTES
@@ -1010,6 +1127,7 @@ class MeetingMinutesTests(TestCase):
         choice_values = [value for value, _ in form.fields["meeting_type"].choices]
 
         self.assertIn(MeetingType.PROJECT_MANAGER_NOTES, choice_values)
+        self.assertIn(MeetingType.MEETING_HEALTH_REPORT, choice_values)
         self.assertNotIn(MeetingType.LUJY_PM_NOTES, choice_values)
 
     def test_project_manager_compaction_prompt_preserves_information_with_word_cap(self):

@@ -6,6 +6,7 @@ from .web_views import (
     FinishChunkedImportView,
     ImportMeetingRecordingView,
     MeetingDetailView,
+    MeetingHealthDashboardView,
     MeetingMinutesPdfView,
     MeetingListView,
     MeetingProgressView,
@@ -15,6 +16,7 @@ from .web_views import (
 
 urlpatterns = [
     path("", MeetingListView.as_view(), name="web-meetings"),
+    path("health/", MeetingHealthDashboardView.as_view(), name="web-health-dashboard"),
     path("import/", ImportMeetingRecordingView.as_view(), name="web-import-meeting"),
     path("import/chunked/start/", StartChunkedImportView.as_view(), name="web-import-chunked-start"),
     path(

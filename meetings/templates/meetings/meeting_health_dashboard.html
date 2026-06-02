@@ -1,0 +1,142 @@
+{% extends "meetings/base.html" %}
+
+{% block title %}Meeting health dashboard - Meeting Transcribe{% endblock %}
+
+{% block content %}
+<header class="topbar">
+    <div>
+        <p><a href="{% url 'web-meetings' %}">Back to meetings</a></p>
+        <h1>Meeting health dashboard</h1>
+        <p class="subtitle">Health scores across all visible meetings.</p>
+    </div>
+    <form class="logout-form" method="post" action="{% url 'logout' %}">
+        {% csrf_token %}
+        <button class="secondary" type="submit">Log out</button>
+    </form>
+</header>
+
+<section class="stats-grid">
+    <div class="stat-box">
+        <p class="stat-value">{{ total_meetings }}</p>
+        <p class="stat-label">Total meetings</p>
+    </div>
+    <div class="stat-box">
+        <p class="stat-value">{% if average_score is not None %}{{ average_score }}/10{% else %}-{% endif %}</p>
+        <p class="stat-label">Average health score</p>
+    </div>
+    <div class="stat-box">
+        <p class="stat-value">{{ reported_count }}</p>
+        <p class="stat-label">Reports generated</p>
+    </div>
+    <div class="stat-box">
+        <p class="stat-value">{{ missing_count }}</p>
+        <p class="stat-label">Missing reports</p>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-box">
+        <p class="stat-value">{{ high_score_count }}</p>
+        <p class="stat-label">High score meetings, 8+</p>
+    </div>
+    <div class="stat-box">
+        <p class="stat-value">{{ medium_score_count }}</p>
+        <p class="stat-label">Medium score meetings, 5-7.9</p>
+    </div>
+    <div class="stat-box">
+        <p class="stat-value">{{ low_score_count }}</p>
+        <p class="stat-label">Low score meetings, below 5</p>
+    </div>
+    <div class="stat-box">
+        <p class="stat-value">{{ rows|length }}</p>
+        <p class="stat-label">Visible rows</p>
+    </div>
+</section>
+
+<section class="meeting">
+    <h2 class="meeting-title">All meeting scores</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Meeting</th>
+                <th>Owner</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Score</th>
+                <th>Report</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td>
+                        <a href="{% url 'web-meeting-detail' row.meeting.id %}">
+                            {{ row.meeting.title|default:"Mobile meeting" }}
+                        </a>
+                        <div class="meta">{{ row.segment_count }} segments &middot; {{ row.completed_transcription_count }} transcribed</div>
+                    </td>
+                    <td>{{ row.owner.username }}</td>
+                    <td>{{ row.meeting.started_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ row.meeting.get_status_display }}</td>
+                    <td>
+                        {% if row.score is not None %}
+                            <span class="score-pill">{{ row.score }}/10</span>
+                        {% else %}
+                            <span class="meta">Not generated</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.health_output %}
+                            {{ row.health_output.get_status_display }}
+                            {% if row.health_output.generated_at %}
+                                <div class="meta">{{ row.health_output.generated_at|date:"Y-m-d H:i" }}</div>
+                            {% endif %}
+                            {% if row.health_output.last_error %}
+                                <div class="form-error">{{ row.health_output.last_error }}</div>
+                            {% endif %}
+                        {% else %}
+                            <span class="meta">No report</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if row.health_output and row.health_output.text %}
+                            <a class="button secondary" href="{% url 'web-meeting-detail' row.meeting.id %}?minutes_type=meeting_health_report">
+                                View report
+                            </a>
+                        {% elif row.health_report_is_processing %}
+                            <button type="button" disabled>Processing</button>
+                        {% else %}
+                            <form method="post" action="{% url 'web-generate-minutes' row.meeting.id %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="meeting_type" value="meeting_health_report">
+                                <button type="submit">Generate report</button>
+                            </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="7">No meetings available.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+{% if lowest_rows %}
+    <section class="meeting">
+        <h2 class="meeting-title">Lowest scoring meetings</h2>
+        <div class="meeting-list">
+            {% for row in lowest_rows %}
+                <article>
+                    <a href="{% url 'web-meeting-detail' row.meeting.id %}?minutes_type=meeting_health_report">
+                        {{ row.meeting.title|default:"Mobile meeting" }}
+                    </a>
+                    <div class="meta">{{ row.owner.username }} &middot; {{ row.score }}/10</div>
+                </article>
+            {% endfor %}
+        </div>
+    </section>
+{% endif %}
+{% endblock %}
