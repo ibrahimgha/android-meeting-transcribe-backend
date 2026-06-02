@@ -4,7 +4,7 @@ import json
 import math
 import wave
 from array import array
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -185,6 +185,78 @@ class MeetingApiTests(APITestCase):
         response = self.client.post(f"/api/meetings/{meeting.id}/end/", {})
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_regular_api_user_cannot_access_system_meeting_report(self):
+        response = self.client.get(
+            "/api/reports/meetings-by-user/",
+            {"start_date": "2026-05-01", "end_date": "2026-05-31"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_all_meetings_user_can_view_meetings_by_user_report(self):
+        UserWebSettings.objects.update_or_create(
+            user=self.user,
+            defaults={"force_password_change": False, "can_view_all_meetings": True},
+        )
+        other_user = User.objects.create_user(
+            username="report-other",
+            email="report-other@example.com",
+            password="strong-password-123",
+        )
+        own_meeting = Meeting.objects.create(
+            user=self.user,
+            title="Own report meeting",
+            status=MeetingStatus.COMPLETE,
+            started_at=datetime(2026, 5, 1, 10, 0, tzinfo=datetime_timezone.utc),
+            ended_at=datetime(2026, 5, 1, 10, 30, tzinfo=datetime_timezone.utc),
+        )
+        other_meeting = Meeting.objects.create(
+            user=other_user,
+            title="Other report meeting",
+            status=MeetingStatus.COMPLETE,
+            started_at=datetime(2026, 5, 2, 11, 0, tzinfo=datetime_timezone.utc),
+            ended_at=datetime(2026, 5, 2, 12, 15, tzinfo=datetime_timezone.utc),
+        )
+        Meeting.objects.create(
+            user=other_user,
+            title="Outside range",
+            status=MeetingStatus.COMPLETE,
+            started_at=datetime(2026, 6, 1, 11, 0, tzinfo=datetime_timezone.utc),
+            ended_at=datetime(2026, 6, 1, 12, 0, tzinfo=datetime_timezone.utc),
+        )
+
+        response = self.client.get(
+            "/api/reports/meetings-by-user/",
+            {"start_date": "2026-05-01", "end_date": "2026-05-02"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["total_users"], 2)
+        self.assertEqual(response.data["total_meetings"], 2)
+        self.assertEqual(response.data["total_duration_seconds"], 6300)
+        users_by_name = {item["user"]["username"]: item for item in response.data["users"]}
+        self.assertEqual(users_by_name[self.user.username]["meeting_count"], 1)
+        self.assertEqual(users_by_name[self.user.username]["total_duration_seconds"], 1800)
+        self.assertEqual(users_by_name["report-other"]["meeting_count"], 1)
+        self.assertEqual(users_by_name["report-other"]["total_duration_seconds"], 4500)
+        self.assertEqual(users_by_name[self.user.username]["meetings"][0]["id"], str(own_meeting.id))
+        self.assertEqual(users_by_name["report-other"]["meetings"][0]["id"], str(other_meeting.id))
+
+    def test_meetings_by_user_report_requires_valid_date_range(self):
+        UserWebSettings.objects.update_or_create(
+            user=self.user,
+            defaults={"force_password_change": False, "can_view_all_meetings": True},
+        )
+
+        missing_response = self.client.get("/api/reports/meetings-by-user/")
+        invalid_response = self.client.get(
+            "/api/reports/meetings-by-user/",
+            {"start_date": "2026-06-01", "end_date": "2026-05-01"},
+        )
+
+        self.assertEqual(missing_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid_response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_import_recording_creates_pending_background_job(self):
         response = self.client.post(
