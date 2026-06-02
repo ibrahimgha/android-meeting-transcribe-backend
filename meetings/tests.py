@@ -620,9 +620,12 @@ class MeetingMinutesTests(TestCase):
 
     def test_web_meetings_requires_login(self):
         response = self.client.get("/meetings/")
+        health_response = self.client.get("/meetings/health/")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("/accounts/login/", response["Location"])
+        self.assertEqual(health_response.status_code, 302)
+        self.assertIn("/accounts/login/", health_response["Location"])
 
     def test_first_web_login_requires_password_change(self):
         User.objects.create_user(username="first-login", password="temporary-password-123")

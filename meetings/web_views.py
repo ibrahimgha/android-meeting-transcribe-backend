@@ -396,6 +396,8 @@ class MeetingHealthDashboardView(LoginRequiredMixin, TemplateView):
     template_name = "meetings/meeting_health_dashboard.html"
 
     def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return super().dispatch(request, *args, **kwargs)
         if not can_view_all_meetings(request.user):
             raise Http404("Meeting health dashboard is not available.")
         return super().dispatch(request, *args, **kwargs)
