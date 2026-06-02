@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 from openai import OpenAI
 
-from .minutes import format_timestamp, serialize_response
+from .minutes import format_timestamp, queue_health_report_for_meeting, serialize_response
 from .models import (
     AudioSegment,
     Meeting,
@@ -258,6 +258,10 @@ def maybe_process_completed_meeting(meeting: Meeting) -> None:
     meeting.refresh_from_db()
     if meeting.status != MeetingStatus.COMPLETE or not settings.OPENAI_API_KEY:
         return
+    try:
+        queue_health_report_for_meeting(meeting)
+    except Exception:
+        pass
     if meeting.output_status == MeetingOutputStatus.PROCESSING:
         return
     try:

@@ -29,6 +29,7 @@ from .minutes import (
     chunk_transcript,
     generate_minutes_for_meeting,
     process_next_pending_minutes,
+    queue_health_report_for_meeting,
     queue_minutes_for_meeting,
 )
 from .import_processing import claim_next_pending_import, process_next_pending_import
@@ -259,6 +260,32 @@ class TranscriptionQueueTests(TestCase):
         self.assertEqual(fake_client.sequences, [1, 2])
         self.meeting.refresh_from_db()
         self.assertEqual(self.meeting.status, MeetingStatus.COMPLETE)
+
+    @override_settings(OPENAI_API_KEY="test-key")
+    @patch("meetings.postprocessing.process_meeting_outputs")
+    def test_queues_health_report_when_transcription_finishes(self, mock_process_outputs):
+        self.make_segment(2)
+        self.make_segment(1)
+        fake_client = FakeTranscriptionClient()
+
+        process_next_pending_segment(client=fake_client)
+        self.assertFalse(
+            MeetingMinutesOutput.objects.filter(
+                meeting=self.meeting,
+                meeting_type=MeetingType.MEETING_HEALTH_REPORT,
+            ).exists()
+        )
+
+        process_next_pending_segment(client=fake_client)
+
+        self.meeting.refresh_from_db()
+        output = MeetingMinutesOutput.objects.get(
+            meeting=self.meeting,
+            meeting_type=MeetingType.MEETING_HEALTH_REPORT,
+        )
+        self.assertEqual(self.meeting.status, MeetingStatus.COMPLETE)
+        self.assertEqual(output.status, MeetingMinutesStatus.PENDING)
+        mock_process_outputs.assert_called_once()
 
     def test_returns_none_when_queue_empty_without_openai_key(self):
         self.assertIsNone(process_next_pending_segment())
@@ -922,6 +949,26 @@ class MeetingMinutesTests(TestCase):
         self.assertEqual(meeting.minutes_text, "## Summary\n- Clear next step.")
         self.assertEqual(meeting.minutes_status, MeetingMinutesStatus.COMPLETE)
         self.assertIn("customer portal", fake_client.transcripts[0])
+
+    def test_background_health_report_processing_preserves_selected_minutes(self):
+        meeting = self.make_meeting()
+        meeting.meeting_type = MeetingType.REQUIREMENT_GATHERING
+        meeting.minutes_text = "- Existing requirements."
+        meeting.minutes_status = MeetingMinutesStatus.COMPLETE
+        meeting.save(update_fields=["meeting_type", "minutes_text", "minutes_status", "updated_at"])
+        output = queue_health_report_for_meeting(meeting)
+        fake_client = FakeMinutesClient()
+
+        processed = process_next_pending_minutes(client=fake_client)
+
+        meeting.refresh_from_db()
+        output.refresh_from_db()
+        self.assertEqual(processed.id, meeting.id)
+        self.assertEqual(output.status, MeetingMinutesStatus.COMPLETE)
+        self.assertEqual(output.text, "## Summary\n- Clear next step.")
+        self.assertEqual(meeting.meeting_type, MeetingType.REQUIREMENT_GATHERING)
+        self.assertEqual(meeting.minutes_text, "- Existing requirements.")
+        self.assertEqual(meeting.minutes_status, MeetingMinutesStatus.COMPLETE)
 
     def test_minutes_outputs_are_preserved_per_meeting_type(self):
         meeting = self.make_meeting()

@@ -148,13 +148,17 @@ def generate_minutes_for_meeting(
     meeting: Meeting,
     client: OpenAIMinutesClient | None = None,
     output: MeetingMinutesOutput | None = None,
+    sync_parent: bool = True,
 ) -> Meeting:
     output = output or get_minutes_output(meeting)
+    original_meeting_type = meeting.meeting_type
+    meeting.meeting_type = output.meeting_type
     output.status = MeetingMinutesStatus.PROCESSING
     output.started_at = timezone.now()
     output.last_error = ""
     output.save(update_fields=["status", "started_at", "last_error", "updated_at"])
-    sync_meeting_minutes_fields(meeting, output)
+    if sync_parent:
+        sync_meeting_minutes_fields(meeting, output)
     try:
         client = client or OpenAIMinutesClient()
         result = client.generate(meeting)
@@ -162,7 +166,10 @@ def generate_minutes_for_meeting(
         output.status = MeetingMinutesStatus.FAILED
         output.last_error = str(exc)
         output.save(update_fields=["status", "last_error", "updated_at"])
-        sync_meeting_minutes_fields(meeting, output)
+        if sync_parent:
+            sync_meeting_minutes_fields(meeting, output)
+        else:
+            meeting.meeting_type = original_meeting_type
         raise
 
     output.text = result.text
@@ -182,7 +189,10 @@ def generate_minutes_for_meeting(
             "updated_at",
         ],
     )
-    sync_meeting_minutes_fields(meeting, output)
+    if sync_parent:
+        sync_meeting_minutes_fields(meeting, output)
+    else:
+        meeting.meeting_type = original_meeting_type
     return meeting
 
 
@@ -213,6 +223,51 @@ def queue_minutes_for_meeting(meeting: Meeting) -> Meeting:
     return meeting
 
 
+def queue_health_report_for_meeting(
+    meeting: Meeting,
+    *,
+    force: bool = False,
+) -> MeetingMinutesOutput | None:
+    meeting.refresh_from_db()
+    if meeting.status != MeetingStatus.COMPLETE:
+        return None
+    if not build_transcript(meeting).strip():
+        return None
+
+    output, _ = MeetingMinutesOutput.objects.get_or_create(
+        meeting=meeting,
+        meeting_type=MeetingType.MEETING_HEALTH_REPORT,
+    )
+    if not force:
+        if output.status in {MeetingMinutesStatus.PENDING, MeetingMinutesStatus.PROCESSING}:
+            return output
+        if output.status == MeetingMinutesStatus.COMPLETE and output.text.strip():
+            return output
+
+    output.status = MeetingMinutesStatus.PENDING
+    output.requested_at = timezone.now()
+    output.started_at = None
+    output.last_error = ""
+    output.text = ""
+    output.model = ""
+    output.response = {}
+    output.generated_at = None
+    output.save(
+        update_fields=[
+            "status",
+            "requested_at",
+            "started_at",
+            "last_error",
+            "text",
+            "model",
+            "response",
+            "generated_at",
+            "updated_at",
+        ],
+    )
+    return output
+
+
 def claim_next_pending_minutes() -> MeetingMinutesOutput | None:
     requeue_stale_minutes()
     with transaction.atomic():
@@ -235,7 +290,8 @@ def claim_next_pending_minutes() -> MeetingMinutesOutput | None:
         output.started_at = timezone.now()
         output.last_error = ""
         output.save(update_fields=["status", "started_at", "last_error", "updated_at"])
-        sync_meeting_minutes_fields(output.meeting, output)
+        if output.meeting.meeting_type == output.meeting_type:
+            sync_meeting_minutes_fields(output.meeting, output)
         return output
 
 
@@ -265,8 +321,13 @@ def process_next_pending_minutes(
         return None
     try:
         meeting = output.meeting
-        meeting.meeting_type = output.meeting_type
-        return generate_minutes_for_meeting(meeting, client=client, output=output)
+        sync_parent = meeting.meeting_type == output.meeting_type
+        return generate_minutes_for_meeting(
+            meeting,
+            client=client,
+            output=output,
+            sync_parent=sync_parent,
+        )
     except Exception:
         return output.meeting
 
