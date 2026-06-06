@@ -162,3 +162,21 @@ PM_NOTES_PDF_FOOTER_TEXT = os.environ.get("PM_NOTES_PDF_FOOTER_TEXT", "")
 
 LOGIN_REDIRECT_URL = "/meetings/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
+
+MEETINGS_LOG_LEVEL = os.environ.get("MEETINGS_LOG_LEVEL", "INFO")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "meetings": {
+            "handlers": ["console"],
+            "level": MEETINGS_LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}

@@ -1,8 +1,10 @@
 import io
+import logging
 import math
 import shutil
 import subprocess
 import tempfile
+import time
 import wave
 from array import array
 from dataclasses import dataclass
@@ -27,6 +29,9 @@ from .models import (
     MeetingStatus,
 )
 from .import_formats import COMPRESSED_IMPORT_AUDIO_EXTENSIONS, SUPPORTED_IMPORT_AUDIO_EXTENSIONS
+
+
+logger = logging.getLogger(__name__)
 
 
 class MeetingImportProcessingError(ValueError):
@@ -147,6 +152,16 @@ def process_next_pending_import() -> MeetingImport | None:
     if import_job is None:
         return None
 
+    started_monotonic = time.monotonic()
+    logger.info(
+        "meeting_import_processing_started meeting_id=%s import_id=%s filename=%s "
+        "size_bytes=%s content_type=%s",
+        import_job.meeting_id,
+        import_job.id,
+        import_job.original_filename,
+        import_job.size_bytes,
+        import_job.content_type,
+    )
     reset_interrupted_import_outputs(import_job)
 
     try:
@@ -154,6 +169,7 @@ def process_next_pending_import() -> MeetingImport | None:
         if created_count <= 0:
             raise MeetingImportProcessingError("No speech segments were detected in this recording.")
     except Exception as exc:
+        elapsed_seconds = time.monotonic() - started_monotonic
         import_job.status = MeetingImportStatus.FAILED
         import_job.last_error = str(exc)
         import_job.progress_message = f"Failed: {str(exc)[:140]}"
@@ -170,7 +186,15 @@ def process_next_pending_import() -> MeetingImport | None:
         if not import_job.meeting.segments.exists():
             import_job.meeting.status = MeetingStatus.FAILED
             import_job.meeting.save(update_fields=["status", "updated_at"])
+        logger.exception(
+            "meeting_import_processing_failed meeting_id=%s import_id=%s elapsed_seconds=%.3f error=%s",
+            import_job.meeting_id,
+            import_job.id,
+            elapsed_seconds,
+            str(exc),
+        )
     else:
+        elapsed_seconds = time.monotonic() - started_monotonic
         import_job.status = MeetingImportStatus.COMPLETE
         import_job.created_segments = created_count
         import_job.progress_percent = 100
@@ -192,6 +216,15 @@ def process_next_pending_import() -> MeetingImport | None:
         meeting.status = MeetingStatus.ENDED
         meeting.ended_at = meeting.started_at + timedelta(milliseconds=duration_ms)
         meeting.save(update_fields=["status", "ended_at", "updated_at"])
+        logger.info(
+            "meeting_import_processing_completed meeting_id=%s import_id=%s "
+            "elapsed_seconds=%.3f recording_duration_seconds=%.3f created_segments=%s",
+            import_job.meeting_id,
+            import_job.id,
+            elapsed_seconds,
+            duration_ms / 1000,
+            created_count,
+        )
 
     return import_job
 
