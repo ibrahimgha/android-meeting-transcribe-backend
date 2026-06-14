@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand
+from django.conf import settings
 
 from meetings.transcription import run_transcription_loop
 
@@ -24,11 +25,18 @@ class Command(BaseCommand):
             default=2.0,
             help="Seconds to wait before polling again when the queue is empty.",
         )
+        parser.add_argument(
+            "--segment-concurrency",
+            type=int,
+            default=getattr(settings, "TRANSCRIPTION_CONCURRENCY", 10),
+            help="Maximum number of audio segment transcription jobs to run in parallel.",
+        )
 
     def handle(self, *args, **options):
         processed = run_transcription_loop(
             once=options["once"],
             limit=options["limit"],
             sleep_seconds=options["sleep"],
+            segment_concurrency=options["segment_concurrency"],
         )
         self.stdout.write(self.style.SUCCESS(f"Processed {processed} queue item(s)."))

@@ -50,7 +50,12 @@ from .models import (
 )
 from .openai_utils import chat_completion_options
 from .postprocessing import MessageDraft, TextResult, process_meeting_outputs
-from .transcription import TranscriptionResult, claim_next_pending_segment, process_next_pending_segment
+from .transcription import (
+    TranscriptionResult,
+    claim_next_pending_segment,
+    process_pending_segment_batch,
+    process_next_pending_segment,
+)
 from .web_views import can_view_all_meetings, extract_health_score
 
 User = get_user_model()
@@ -332,6 +337,24 @@ class TranscriptionQueueTests(TestCase):
         self.assertEqual(fake_client.sequences, [1, 2])
         self.meeting.refresh_from_db()
         self.assertEqual(self.meeting.status, MeetingStatus.COMPLETE)
+
+    def test_processes_segment_batch_with_configured_concurrency(self):
+        for sequence_number in range(1, 5):
+            self.make_segment(sequence_number)
+
+        with patch("meetings.transcription.process_claimed_segment", side_effect=lambda segment: segment) as mock_process:
+            processed = process_pending_segment_batch(concurrency=3)
+
+        self.assertEqual(len(processed), 3)
+        self.assertEqual(mock_process.call_count, 3)
+        self.assertEqual(
+            AudioSegment.objects.filter(transcription_status=SegmentStatus.PROCESSING).count(),
+            3,
+        )
+        self.assertEqual(
+            AudioSegment.objects.filter(transcription_status=SegmentStatus.PENDING).count(),
+            1,
+        )
 
     @override_settings(OPENAI_API_KEY="test-key")
     @patch("meetings.postprocessing.process_meeting_outputs")

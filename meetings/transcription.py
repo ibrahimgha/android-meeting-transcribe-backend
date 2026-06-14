@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import time
 from dataclasses import dataclass
@@ -7,7 +8,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.files.storage import default_storage
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.db.models import Max, Min
 from django.utils import timezone
 from openai import OpenAI
@@ -131,88 +132,157 @@ def process_next_pending_segment(
     if segment is None:
         return None
 
-    started_monotonic = time.monotonic()
-    logger.info(
-        "meeting_segment_transcription_started meeting_id=%s segment_id=%s sequence=%s "
-        "attempt=%s audio_size_bytes=%s audio_duration_seconds=%.3f",
-        segment.meeting_id,
-        segment.id,
-        segment.sequence_number,
-        segment.transcription_attempts,
-        segment.audio_size_bytes,
-        segment_audio_duration_seconds(segment),
-    )
+    return process_claimed_segment(segment, client=client)
 
+
+def process_claimed_segment(
+    segment: AudioSegment,
+    client: OpenAITranscriptionClient | None = None,
+) -> AudioSegment:
+    close_old_connections()
     try:
-        if client is None:
-            client = OpenAITranscriptionClient()
-        result = client.transcribe(segment)
-    except Exception as exc:
-        elapsed_seconds = time.monotonic() - started_monotonic
-        segment.transcription_status = SegmentStatus.FAILED
-        segment.last_error = str(exc)
-        segment.save(
-            update_fields=[
-                "transcription_status",
-                "last_error",
-                "updated_at",
-            ],
-        )
-        logger.exception(
-            "meeting_segment_transcription_failed meeting_id=%s segment_id=%s sequence=%s "
-            "attempt=%s elapsed_seconds=%.3f error=%s",
-            segment.meeting_id,
-            segment.id,
-            segment.sequence_number,
-            segment.transcription_attempts,
-            elapsed_seconds,
-            str(exc),
-        )
-    else:
-        elapsed_seconds = time.monotonic() - started_monotonic
-        segment.transcription_status = SegmentStatus.COMPLETE
-        segment.transcription_text = result.text
-        segment.transcription_model = result.model
-        segment.transcription_response = result.raw_response
-        segment.transcribed_at = timezone.now()
-        segment.last_error = ""
-        segment.save(
-            update_fields=[
-                "transcription_status",
-                "transcription_text",
-                "transcription_model",
-                "transcription_response",
-                "transcribed_at",
-                "last_error",
-                "updated_at",
-            ],
-        )
+        started_monotonic = time.monotonic()
         logger.info(
-            "meeting_segment_transcription_completed meeting_id=%s segment_id=%s sequence=%s "
-            "attempt=%s model=%s elapsed_seconds=%.3f transcript_characters=%s",
+            "meeting_segment_transcription_started meeting_id=%s segment_id=%s sequence=%s "
+            "attempt=%s audio_size_bytes=%s audio_duration_seconds=%.3f",
             segment.meeting_id,
             segment.id,
             segment.sequence_number,
             segment.transcription_attempts,
-            result.model,
-            elapsed_seconds,
-            len(result.text),
+            segment.audio_size_bytes,
+            segment_audio_duration_seconds(segment),
         )
 
-    meeting = segment.meeting
-    previous_meeting_status = meeting.status
-    meeting.refresh_completion_status()
-    meeting.refresh_from_db(fields=["status", "updated_at"])
-    if (
-        previous_meeting_status not in {MeetingStatus.COMPLETE, MeetingStatus.FAILED}
-        and meeting.status in {MeetingStatus.COMPLETE, MeetingStatus.FAILED}
-    ):
-        log_meeting_transcription_finished(meeting)
+        try:
+            if client is None:
+                client = OpenAITranscriptionClient()
+            result = client.transcribe(segment)
+        except Exception as exc:
+            elapsed_seconds = time.monotonic() - started_monotonic
+            segment.transcription_status = SegmentStatus.FAILED
+            segment.last_error = str(exc)
+            segment.save(
+                update_fields=[
+                    "transcription_status",
+                    "last_error",
+                    "updated_at",
+                ],
+            )
+            logger.exception(
+                "meeting_segment_transcription_failed meeting_id=%s segment_id=%s sequence=%s "
+                "attempt=%s elapsed_seconds=%.3f error=%s",
+                segment.meeting_id,
+                segment.id,
+                segment.sequence_number,
+                segment.transcription_attempts,
+                elapsed_seconds,
+                str(exc),
+            )
+        else:
+            elapsed_seconds = time.monotonic() - started_monotonic
+            segment.transcription_status = SegmentStatus.COMPLETE
+            segment.transcription_text = result.text
+            segment.transcription_model = result.model
+            segment.transcription_response = result.raw_response
+            segment.transcribed_at = timezone.now()
+            segment.last_error = ""
+            segment.save(
+                update_fields=[
+                    "transcription_status",
+                    "transcription_text",
+                    "transcription_model",
+                    "transcription_response",
+                    "transcribed_at",
+                    "last_error",
+                    "updated_at",
+                ],
+            )
+            logger.info(
+                "meeting_segment_transcription_completed meeting_id=%s segment_id=%s sequence=%s "
+                "attempt=%s model=%s elapsed_seconds=%.3f transcript_characters=%s",
+                segment.meeting_id,
+                segment.id,
+                segment.sequence_number,
+                segment.transcription_attempts,
+                result.model,
+                elapsed_seconds,
+                len(result.text),
+            )
 
-    from .postprocessing import maybe_process_completed_meeting
+        meeting = segment.meeting
+        previous_meeting_status = meeting.status
+        meeting.refresh_completion_status()
+        meeting.refresh_from_db(fields=["status", "updated_at"])
+        if (
+            previous_meeting_status not in {MeetingStatus.COMPLETE, MeetingStatus.FAILED}
+            and meeting.status in {MeetingStatus.COMPLETE, MeetingStatus.FAILED}
+        ):
+            log_meeting_transcription_finished(meeting)
 
-    maybe_process_completed_meeting(meeting)
-    return segment
+        from .postprocessing import maybe_process_completed_meeting
+
+        maybe_process_completed_meeting(meeting)
+        return segment
+    finally:
+        close_old_connections()
+
+
+def claim_pending_segments(limit: int) -> list[AudioSegment]:
+    segments = []
+    for _ in range(max(0, limit)):
+        segment = claim_next_pending_segment()
+        if segment is None:
+            break
+        segments.append(segment)
+    return segments
+
+
+def process_pending_segment_batch(
+    *,
+    concurrency: int,
+) -> list[AudioSegment]:
+    concurrency = max(1, concurrency)
+    if concurrency == 1:
+        segment = process_next_pending_segment()
+        return [segment] if segment is not None else []
+
+    segments = claim_pending_segments(concurrency)
+    if not segments:
+        return []
+
+    logger.info(
+        "meeting_segment_batch_started concurrency=%s claimed_segments=%s",
+        concurrency,
+        len(segments),
+    )
+    started_monotonic = time.monotonic()
+    processed = []
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        future_to_segment = {
+            executor.submit(process_claimed_segment, segment): segment
+            for segment in segments
+        }
+        for future in as_completed(future_to_segment):
+            segment = future_to_segment[future]
+            try:
+                processed.append(future.result())
+            except Exception:
+                logger.exception(
+                    "meeting_segment_batch_worker_failed meeting_id=%s segment_id=%s sequence=%s",
+                    segment.meeting_id,
+                    segment.id,
+                    segment.sequence_number,
+                )
+
+    logger.info(
+        "meeting_segment_batch_completed concurrency=%s claimed_segments=%s "
+        "processed_segments=%s elapsed_seconds=%.3f",
+        concurrency,
+        len(segments),
+        len(processed),
+        time.monotonic() - started_monotonic,
+    )
+    return sorted(processed, key=lambda segment: (str(segment.meeting_id), segment.sequence_number))
 
 
 def segment_audio_duration_seconds(segment: AudioSegment) -> float:
@@ -279,8 +349,15 @@ def run_transcription_loop(
     once: bool = False,
     limit: int | None = None,
     sleep_seconds: float = 2.0,
+    segment_concurrency: int | None = None,
 ) -> int:
     processed = 0
+    segment_concurrency = max(
+        1,
+        segment_concurrency
+        if segment_concurrency is not None
+        else getattr(settings, "TRANSCRIPTION_CONCURRENCY", 10),
+    )
 
     while True:
         from .import_processing import process_next_pending_import
@@ -292,9 +369,15 @@ def run_transcription_loop(
                 return processed
             continue
 
-        segment = process_next_pending_segment()
-        if segment is not None:
-            processed += 1
+        if limit is not None and processed >= limit:
+            return processed
+
+        batch_limit = segment_concurrency
+        if limit is not None:
+            batch_limit = min(batch_limit, max(0, limit - processed))
+        segments = process_pending_segment_batch(concurrency=batch_limit)
+        if segments:
+            processed += len(segments)
             if limit is not None and processed >= limit:
                 return processed
             continue
