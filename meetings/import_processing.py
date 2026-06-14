@@ -296,24 +296,126 @@ def process_import_recording(
 ) -> tuple[int, int]:
     config = config or ImportAudioConfig()
     update_import_progress(import_job, 5, "Reading recording")
+    stage_started = time.monotonic()
     samples, sample_rate = read_import_samples(import_job, config)
+    log_import_stage(
+        import_job,
+        "read_recording",
+        stage_started,
+        sample_rate=sample_rate,
+        target_sample_rate=config.sample_rate,
+        sample_count=len(samples),
+        audio_duration_seconds=samples_duration_seconds(samples, sample_rate),
+    )
 
     if not samples:
         raise MeetingImportProcessingError("The recording is empty.")
 
     update_import_progress(import_job, 25, "Preparing audio samples")
+    stage_started = time.monotonic()
+    original_sample_rate = sample_rate
+    original_sample_count = len(samples)
     if sample_rate != config.sample_rate:
         samples = resample_linear(samples, sample_rate, config.sample_rate)
+    log_import_stage(
+        import_job,
+        "resample_audio",
+        stage_started,
+        skipped=sample_rate == config.sample_rate,
+        source_sample_rate=original_sample_rate,
+        target_sample_rate=config.sample_rate,
+        source_sample_count=original_sample_count,
+        output_sample_count=len(samples),
+        audio_duration_seconds=samples_duration_seconds(samples, config.sample_rate),
+    )
 
     duration_ms = len(samples) * 1000 // config.sample_rate
     update_import_progress(import_job, 40, "Detecting speech ranges")
+    stage_started = time.monotonic()
     ranges = segment_samples(samples, config)
+    log_import_stage(
+        import_job,
+        "detect_speech_ranges",
+        stage_started,
+        range_count=len(ranges),
+        speech_duration_seconds=ranges_duration_seconds(ranges, config.sample_rate),
+        source_duration_seconds=duration_ms / 1000,
+        frame_ms=config.frame_ms,
+        frame_count=math.ceil(len(samples) / config.frame_samples),
+    )
     update_import_progress(import_job, 65, "Identifying speakers and turns")
+    stage_started = time.monotonic()
     merged_segments = label_and_merge_segments(ranges, samples, config)
+    log_import_stage(
+        import_job,
+        "label_and_merge_segments",
+        stage_started,
+        input_range_count=len(ranges),
+        output_segment_count=len(merged_segments),
+        output_duration_seconds=labeled_segments_duration_seconds(merged_segments),
+        speaker_count=len({segment.label.label for segment in merged_segments}),
+    )
     update_import_progress(import_job, 85, "Creating playable segments")
-    create_audio_segments(import_job, merged_segments, config.sample_rate)
+    stage_started = time.monotonic()
+    total_output_bytes = create_audio_segments(import_job, merged_segments, config.sample_rate)
+    log_import_stage(
+        import_job,
+        "create_audio_segments",
+        stage_started,
+        segment_count=len(merged_segments),
+        total_output_bytes=total_output_bytes,
+        output_duration_seconds=labeled_segments_duration_seconds(merged_segments),
+    )
     update_import_progress(import_job, 95, "Finalizing import")
     return len(merged_segments), duration_ms
+
+
+def log_import_stage(
+    import_job: MeetingImport,
+    stage: str,
+    started_monotonic: float,
+    **metrics,
+) -> None:
+    metric_parts = " ".join(
+        f"{key}={format_log_value(value)}"
+        for key, value in sorted(metrics.items())
+    )
+    logger.info(
+        "meeting_import_stage_completed meeting_id=%s import_id=%s stage=%s "
+        "elapsed_seconds=%.3f %s",
+        import_job.meeting_id,
+        import_job.id,
+        stage,
+        time.monotonic() - started_monotonic,
+        metric_parts,
+    )
+
+
+def format_log_value(value) -> str:
+    if isinstance(value, float):
+        return f"{value:.3f}"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value).replace(" ", "_")
+
+
+def samples_duration_seconds(samples: list[float], sample_rate: int) -> float:
+    if sample_rate <= 0:
+        return 0.0
+    return len(samples) / sample_rate
+
+
+def ranges_duration_seconds(ranges: list[SpeechRange], sample_rate: int) -> float:
+    if sample_rate <= 0:
+        return 0.0
+    return sum(speech_range.size for speech_range in ranges) / sample_rate
+
+
+def labeled_segments_duration_seconds(segments: list[LabeledSpeechSegment]) -> float:
+    return sum(
+        max(0, segment.segment.end_ms - segment.segment.start_ms)
+        for segment in segments
+    ) / 1000
 
 
 def update_import_progress(import_job: MeetingImport, percent: int, message: str) -> None:
@@ -336,14 +438,25 @@ def read_import_samples(
         raise MeetingImportProcessingError(f"Unsupported recording format: {extension or 'unknown'}.")
 
     if extension in COMPRESSED_IMPORT_AUDIO_EXTENSIONS:
-        return decode_with_ffmpeg(import_job.source_file.name, config)
+        return decode_with_ffmpeg(import_job, config)
 
+    stage_started = time.monotonic()
     with default_storage.open(import_job.source_file.name, "rb") as source_file:
-        return read_wav_samples(source_file)
+        samples, sample_rate = read_wav_samples(source_file)
+    log_import_stage(
+        import_job,
+        "read_source_wav",
+        stage_started,
+        extension=extension,
+        sample_rate=sample_rate,
+        sample_count=len(samples),
+        audio_duration_seconds=samples_duration_seconds(samples, sample_rate),
+    )
+    return samples, sample_rate
 
 
 def decode_with_ffmpeg(
-    storage_name: str,
+    import_job: MeetingImport,
     config: ImportAudioConfig,
 ) -> tuple[list[float], int]:
     ffmpeg_binary = resolve_ffmpeg_binary()
@@ -352,14 +465,24 @@ def decode_with_ffmpeg(
             "ffmpeg is required to import MP3, M4A, and MP4 recordings."
         )
 
+    storage_name = import_job.source_file.name
     source_suffix = Path(storage_name).suffix.lower() or ".audio"
     with tempfile.TemporaryDirectory(prefix="meeting-import-decode-") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         source_path = temp_dir / f"source{source_suffix}"
         decoded_path = temp_dir / "decoded.wav"
 
+        stage_started = time.monotonic()
         with default_storage.open(storage_name, "rb") as source, source_path.open("wb") as destination:
             shutil.copyfileobj(source, destination)
+        log_import_stage(
+            import_job,
+            "copy_source_to_temp",
+            stage_started,
+            extension=source_suffix.lstrip("."),
+            source_size_bytes=import_job.size_bytes,
+            temp_size_bytes=source_path.stat().st_size if source_path.exists() else 0,
+        )
 
         command = [
             ffmpeg_binary,
@@ -379,6 +502,7 @@ def decode_with_ffmpeg(
             str(decoded_path),
         ]
         try:
+            stage_started = time.monotonic()
             result = subprocess.run(
                 command,
                 capture_output=True,
@@ -388,13 +512,31 @@ def decode_with_ffmpeg(
             )
         except subprocess.TimeoutExpired as exc:
             raise MeetingImportProcessingError("Timed out while decoding the recording.") from exc
+        log_import_stage(
+            import_job,
+            "ffmpeg_decode",
+            stage_started,
+            return_code=result.returncode,
+            decoded_size_bytes=decoded_path.stat().st_size if decoded_path.exists() else 0,
+            target_sample_rate=config.sample_rate,
+        )
 
         if result.returncode != 0:
             error = (result.stderr or "Unknown ffmpeg error.").strip()
             raise MeetingImportProcessingError(f"Could not decode recording with ffmpeg: {error}")
 
+        stage_started = time.monotonic()
         with decoded_path.open("rb") as decoded:
-            return read_wav_samples(decoded)
+            samples, sample_rate = read_wav_samples(decoded)
+        log_import_stage(
+            import_job,
+            "read_decoded_wav",
+            stage_started,
+            sample_rate=sample_rate,
+            sample_count=len(samples),
+            audio_duration_seconds=samples_duration_seconds(samples, sample_rate),
+        )
+        return samples, sample_rate
 
 
 def resolve_ffmpeg_binary() -> str | None:
@@ -757,7 +899,7 @@ def create_audio_segments(
     import_job: MeetingImport,
     segments: list[LabeledSpeechSegment],
     sample_rate: int,
-) -> None:
+) -> int:
     next_sequence = (
         AudioSegment.objects.filter(meeting=import_job.meeting).aggregate(Max("sequence_number"))[
             "sequence_number__max"
@@ -765,9 +907,11 @@ def create_audio_segments(
         or 0
     ) + 1
 
+    total_output_bytes = 0
     for offset, labeled in enumerate(segments):
         sequence_number = next_sequence + offset
         wav_data = write_wav_bytes(labeled.segment.samples, sample_rate)
+        total_output_bytes += len(wav_data)
         audio_segment = AudioSegment(
             meeting=import_job.meeting,
             user=import_job.user,
@@ -788,6 +932,7 @@ def create_audio_segments(
             save=False,
         )
         audio_segment.save()
+    return total_output_bytes
 
 
 def write_wav_bytes(samples: list[float], sample_rate: int) -> bytes:
