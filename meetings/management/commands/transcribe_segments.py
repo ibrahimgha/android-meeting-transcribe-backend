@@ -28,7 +28,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--segment-concurrency",
             type=int,
-            default=getattr(settings, "TRANSCRIPTION_CONCURRENCY", 10),
+            default=getattr(settings, "TRANSCRIPTION_CONCURRENCY", 20),
             help="Maximum number of audio segment transcription jobs to run in parallel.",
         )
 
