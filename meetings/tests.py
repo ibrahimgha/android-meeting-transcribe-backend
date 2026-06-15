@@ -32,7 +32,13 @@ from .minutes import (
     queue_health_report_for_meeting,
     queue_minutes_for_meeting,
 )
-from .import_processing import claim_next_pending_import, process_next_pending_import
+from .import_processing import (
+    ImportAudioConfig,
+    claim_next_pending_import,
+    detect_speech_ranges,
+    process_next_pending_import,
+    ranges_duration_seconds,
+)
 from . import mcp_api
 from .models import (
     AudioSegment,
@@ -93,6 +99,17 @@ def voiced_samples(sample_rate=16_000) -> array:
     for index in range(int(1.5 * sample_rate)):
         value = 0.24 * math.sin(2.0 * math.pi * 440.0 * index / sample_rate)
         samples.append(value)
+    return samples
+
+
+def low_volume_meeting_samples(sample_rate=16_000) -> array:
+    samples = array("f")
+    for block in range(10):
+        for index in range(int(4.0 * sample_rate)):
+            value = 0.003 * math.sin(2.0 * math.pi * 440.0 * index / sample_rate)
+            samples.append(value)
+        for _ in range(int(4.0 * sample_rate)):
+            samples.append(0.0)
     return samples
 
 
@@ -415,6 +432,17 @@ class MeetingImportQueueTests(TestCase):
     def tearDown(self):
         self.settings_override.disable()
         self.temp_dir.cleanup()
+
+    def test_low_volume_long_recording_uses_speech_detection_fallback(self):
+        config = ImportAudioConfig(
+            low_speech_fallback_min_duration_ms=60_000,
+            low_speech_fallback_min_speech_ms=5_000,
+        )
+        ranges, metrics = detect_speech_ranges(low_volume_meeting_samples(), config)
+
+        self.assertTrue(metrics["fallback_used"])
+        self.assertEqual(metrics["initial_speech_duration_seconds"], 0)
+        self.assertGreaterEqual(ranges_duration_seconds(ranges, config.sample_rate), 35)
 
     def test_process_next_pending_import_creates_pending_segments(self):
         import_job = MeetingImport.objects.create(

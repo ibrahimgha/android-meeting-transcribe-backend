@@ -51,6 +51,13 @@ class ImportAudioConfig:
     max_output_turn_ms: int = 300_000
     utterance_lead_ms: int = 90
     utterance_trail_ms: int = 140
+    low_speech_fallback_min_duration_ms: int = 5 * 60 * 1000
+    low_speech_fallback_min_speech_ms: int = 60 * 1000
+    low_speech_fallback_min_speech_ratio: float = 0.05
+    relaxed_threshold_floor_db: float = -58.0
+    relaxed_threshold_ceiling_db: float = -48.0
+    relaxed_threshold_percentile: float = 0.50
+    relaxed_threshold_offset_db: float = 1.0
 
     @property
     def frame_samples(self) -> int:
@@ -332,7 +339,7 @@ def process_import_recording(
     duration_ms = len(samples) * 1000 // config.sample_rate
     update_import_progress(import_job, 40, "Detecting speech ranges")
     stage_started = time.monotonic()
-    ranges = segment_samples(samples, config)
+    ranges, speech_metrics = detect_speech_ranges(samples, config)
     log_import_stage(
         import_job,
         "detect_speech_ranges",
@@ -342,6 +349,7 @@ def process_import_recording(
         source_duration_seconds=duration_ms / 1000,
         frame_ms=config.frame_ms,
         frame_count=math.ceil(len(samples) / config.frame_samples),
+        **speech_metrics,
     )
     update_import_progress(import_job, 65, "Identifying speakers and turns")
     stage_started = time.monotonic()
@@ -622,8 +630,64 @@ def resample_linear(samples: list[float], source_rate: int, target_rate: int) ->
 
 
 def segment_samples(samples: list[float], config: ImportAudioConfig) -> list[SpeechRange]:
+    ranges, _ = detect_speech_ranges(samples, config)
+    return ranges
+
+
+def detect_speech_ranges(
+    samples: list[float],
+    config: ImportAudioConfig,
+) -> tuple[list[SpeechRange], dict[str, object]]:
     frame_values = frame_db(samples, config.frame_samples)
     speech_threshold_db = adaptive_speech_threshold(frame_values)
+    ranges = segment_samples_with_threshold(samples, config, frame_values, speech_threshold_db)
+    initial_speech_seconds = ranges_duration_seconds(ranges, config.sample_rate)
+    metrics: dict[str, object] = {
+        "speech_threshold_db": speech_threshold_db,
+        "initial_speech_duration_seconds": initial_speech_seconds,
+        "fallback_used": False,
+    }
+
+    duration_ms = len(samples) * 1000 // config.sample_rate
+    if should_retry_low_speech_detection(
+        duration_ms=duration_ms,
+        speech_seconds=initial_speech_seconds,
+        config=config,
+    ):
+        relaxed_threshold_db = relaxed_speech_threshold(frame_values, config)
+        fallback_ranges = segment_samples_with_threshold(
+            samples,
+            config,
+            frame_values,
+            relaxed_threshold_db,
+        )
+        fallback_speech_seconds = ranges_duration_seconds(fallback_ranges, config.sample_rate)
+        metrics.update(
+            {
+                "fallback_threshold_db": relaxed_threshold_db,
+                "fallback_speech_duration_seconds": fallback_speech_seconds,
+            }
+        )
+        if should_use_low_speech_fallback(
+            initial_speech_seconds=initial_speech_seconds,
+            fallback_speech_seconds=fallback_speech_seconds,
+            fallback_range_count=len(fallback_ranges),
+            duration_ms=duration_ms,
+            config=config,
+        ):
+            ranges = fallback_ranges
+            metrics["speech_threshold_db"] = relaxed_threshold_db
+            metrics["fallback_used"] = True
+
+    return ranges, metrics
+
+
+def segment_samples_with_threshold(
+    samples: list[float],
+    config: ImportAudioConfig,
+    frame_values: list[float],
+    speech_threshold_db: float,
+) -> list[SpeechRange]:
     lead_samples = config.sample_rate * config.utterance_lead_ms // 1000
     trail_samples = config.sample_rate * config.utterance_trail_ms // 1000
     end_silence_frames = max(1, config.end_silence_ms // config.frame_ms)
@@ -673,6 +737,55 @@ def segment_samples(samples: list[float], config: ImportAudioConfig) -> list[Spe
             )
 
     return trim_overlaps(merge_short_ranges(ranges, min_segment_samples), min_segment_samples)
+
+
+def should_retry_low_speech_detection(
+    *,
+    duration_ms: int,
+    speech_seconds: float,
+    config: ImportAudioConfig,
+) -> bool:
+    if duration_ms < config.low_speech_fallback_min_duration_ms:
+        return False
+    duration_seconds = duration_ms / 1000
+    expected_min_seconds = max(
+        config.low_speech_fallback_min_speech_ms / 1000,
+        duration_seconds * config.low_speech_fallback_min_speech_ratio,
+    )
+    return speech_seconds < expected_min_seconds
+
+
+def relaxed_speech_threshold(frame_values: list[float], config: ImportAudioConfig) -> float:
+    if not frame_values:
+        return config.relaxed_threshold_floor_db
+    sorted_values = sorted(frame_values)
+    baseline = percentile(sorted_values, config.relaxed_threshold_percentile)
+    requested = baseline + config.relaxed_threshold_offset_db
+    return min(
+        config.relaxed_threshold_ceiling_db,
+        max(config.relaxed_threshold_floor_db, requested),
+    )
+
+
+def should_use_low_speech_fallback(
+    *,
+    initial_speech_seconds: float,
+    fallback_speech_seconds: float,
+    fallback_range_count: int,
+    duration_ms: int,
+    config: ImportAudioConfig,
+) -> bool:
+    if fallback_range_count <= 0:
+        return False
+    duration_seconds = max(1.0, duration_ms / 1000)
+    if fallback_speech_seconds > duration_seconds * 0.85:
+        return False
+    required_seconds = max(
+        config.low_speech_fallback_min_speech_ms / 1000,
+        duration_seconds * config.low_speech_fallback_min_speech_ratio,
+    )
+    required_improvement = max(initial_speech_seconds * 3.0, required_seconds)
+    return fallback_speech_seconds >= required_improvement
 
 
 def frame_db(samples: list[float], frame_samples: int) -> list[float]:
