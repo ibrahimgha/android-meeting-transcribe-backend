@@ -620,8 +620,10 @@ Extract normalized source material for the "{output_name}" output from this tran
 Rules:
 - This is not a transcript recap. Do not preserve the conversation flow, back-and-forth, examples, or exact phrasing.
 - Convert the discussion into useful conclusions, decisions, actionable requirements, implementation notes, risks, and open points.
-- Capture only information that affects product scope, implementation, UX, delivery, ownership, risk, or next steps.
+- Capture only information that affects product scope, implementation, UX, delivery, ownership, action items, risk, dependencies, or next steps.
 - Capture requested changes, decisions, constraints, edge cases, fields, filters, role permissions, screens, flows, buttons, validation rules, UX notes, risks, and open points.
+- When ownership exists, capture it as an action item using business wording such as "Client will...", "Bit68 will...", or "Product team will...".
+- For technical topics such as architecture, migration, databases, APIs, integrations, infrastructure, reporting, security, deployment, or go-live, capture the intended direction, decisions, dependencies, and open questions.
 - Omit filler, repetition, negotiation wording, explanations of why someone thinks something, and anything that does not change the final project understanding.
 - Keep enough context to let the final pass group related requirements under one topic.
 - If multiple lines refer to the same topic, keep them adjacent under one heading instead of scattering them.
@@ -658,14 +660,19 @@ Critical rules:
 - Output only the final notes.
 - Use the exact top-level structure below.
 - This must read like a structured requirements/conclusions document, not like meeting minutes and not like a transcript recap.
+- Write as a senior Product Manager and Business Analyst preparing client-facing, executive-friendly meeting minutes suitable for email distribution.
 - Be summarized like the Requirements Gathering output: concise, grouped, and outcome-focused.
 - Target 300-650 words. For an unusually dense meeting, you may go up to 850 words only if needed to preserve important conclusions.
-- Do not scatter related requirements. Group all related items under the same topic heading, even if they came from different transcript chunks.
+- Do not scatter related requirements. Group all related items under logical business sections, even if they came from different transcript chunks.
+- Prefer clear business-section headings when applicable, such as Project Scope, Requirements & Features, Technical Discussion, Data & Reporting, UX & Design, Operations, Deployment & Go-Live, Security & Integrations, Discovery Phase, Risks & Dependencies.
+- Convert requirements into requirement-style statements, not statements about the conversation.
+- For technical topics such as architecture, migration, databases, APIs, integrations, infrastructure, reporting, security, deployment, or go-live, summarize the intended direction, decisions, dependencies, and open questions.
 - Merge repeated or closely related bullets into one refined bullet whenever they lead to the same conclusion.
 - For each topic, present one final decision or final direction. Do not list multiple opinions, rejected alternatives, interim preferences, or debate history.
 - If a topic has no final decision, move it to Open Points and state what remains unresolved.
 - Omit who said what, filler, repeated wording, examples that add no new requirement, conversational phrasing, and discussion history.
 - Preserve useful final information: requirements, decisions, constraints, edge cases, filters, fields, role permissions, screen or flow changes, buttons, validation rules, risks, UX notes, actions, and open points.
+- When ownership exists, state it clearly using business wording such as "Client will provide API documentation.", "Bit68 will prepare the architecture proposal.", or "Product team will review the BRD and provide feedback."
 - Under Discussion Points, every bullet must be one of these useful outputs: a requirement, decision, action item, constraint, or UX/delivery note.
 - Do not place risks or open points under individual discussion topics.
 - Gather all risks into the final Risks section.
@@ -703,6 +710,12 @@ Risks:
 Open Points:
 
 [List consolidated open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups at the end. If none are clear, write "Not specified".]
+
+Closing:
+
+Please review the above and let us know if any adjustments are required.
+
+If no feedback is received within 24 hours, the meeting minutes will be considered approved.
 
 Style reference:
 
@@ -746,10 +759,12 @@ Rewrite them into compact, grouped, outcome-focused project-manager notes.
 
 Rules:
 - Output only the rewritten notes.
-- Keep the exact same top-level structure: Meeting Details, Attendees, Discussion Points, Risks, Open Points.
+- Keep the exact same top-level structure: Meeting Details, Attendees, Discussion Points, Risks, Open Points, Closing.
 - Target 300-650 words. Hard maximum: 850 words.
 - Preserve every useful unique requirement, decision, action item, constraint, edge case, filter, field, role permission, screen or flow change, button, validation rule, risk, UX note, and open point.
-- Group all related requirements under the same topic. Do not repeat the same topic in multiple places.
+- Group all related requirements under logical business sections. Do not repeat the same topic in multiple places.
+- Prefer clear business-section headings when applicable, such as Project Scope, Requirements & Features, Technical Discussion, Data & Reporting, UX & Design, Operations, Deployment & Go-Live, Security & Integrations, Discovery Phase, Risks & Dependencies.
+- Keep the result client-facing, executive-friendly, and suitable for email distribution.
 - Merge sibling bullets aggressively when no information is lost.
 - Remove transcript-recapping language. The result should read like refined PM conclusions, not like what people said during the meeting.
 - Every bullet must be actionable or decision-oriented. Drop bullets that only describe conversation history.
@@ -760,6 +775,7 @@ Rules:
 - Move all open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups to the final Open Points section.
 - Do not leave risks or open points under individual discussion topics.
 - Do not output person_1, person_2, speaker_1, or speaker_2. Use real company/team names if clear; otherwise omit attribution or use Client, Vendor, Product team, or Not specified.
+- End with the exact Closing section from the required structure.
 - Keep date and time as:
   - Date: {meeting_date}
   - Time: {meeting_time}
@@ -789,15 +805,19 @@ Instructions:
 - You are generating "{output_name}" from a transcribed meeting.
 - The transcript may contain transcription mistakes, wrong speaker labels, missing punctuation, repeated phrases, or misheard product and feature names. Deduce the intended meaning when reasonably clear, but do not invent requirements or decisions.
 - Generate refined PM conclusions, not a transcript-style meeting recap.
+- Write as a senior Product Manager and Business Analyst preparing client-facing, executive-friendly meeting minutes suitable for email distribution.
 - Be summarized like Requirements Gathering output: concise, grouped by topic, and focused on final useful information.
 - Capture useful conclusions, decisions, actionable requirements, open points, risks, constraints, UX notes, and delivery notes.
 - Output only the notes. Do not include explanations or a conversational summary.
 - Use the exact top-level structure below.
 - Target 300-650 words. For a dense meeting, go up to 850 words only if needed.
-- Group all related requirements under the same topic. Do not scatter related items across multiple headings.
+- Group all related requirements under logical business sections. Do not scatter related items across multiple headings.
+- Prefer clear business-section headings when applicable, such as Project Scope, Requirements & Features, Technical Discussion, Data & Reporting, UX & Design, Operations, Deployment & Go-Live, Security & Integrations, Discovery Phase, Risks & Dependencies.
 - Merge related bullets when they lead to the same conclusion or action.
 - For each topic, present one final decision or final direction. Do not list multiple opinions, rejected alternatives, interim preferences, or debate history.
 - If a topic has no final decision, move it to Open Points and state what remains unresolved.
+- Convert requirements into requirement-style statements, not statements about the conversation.
+- For technical topics such as architecture, migration, databases, APIs, integrations, infrastructure, reporting, security, deployment, or go-live, summarize the intended direction, decisions, dependencies, and open questions.
 - Under Discussion Points, every bullet must be outcome-focused: a requirement, decision, action item, constraint, UX note, or delivery note.
 - Do not place risks or open points under individual discussion topics.
 - Gather all risks into the final Risks section.
@@ -807,6 +827,7 @@ Instructions:
 - Use actual company, vendor, client, or team names when they can be inferred from the transcript. If the actual name is not clear, use Client, Vendor, Product team, or Not specified only when attribution matters.
 - If attribution does not matter to the requirement, omit attribution.
 - Do not invent attendees or company names.
+- When ownership exists, state it clearly using business wording such as "Client will provide API documentation.", "Bit68 will prepare the architecture proposal.", or "Product team will review the BRD and provide feedback."
 - If something is discussed and later removed, omit it completely.
 - If two points contradict each other, keep the later one and omit the earlier one.
 - Use polished professional PM wording: concise, formal, decisive, and implementation-ready.
@@ -838,6 +859,12 @@ Open Points:
 
 [List consolidated open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups at the end. If none are clear, write "Not specified".]
 
+Closing:
+
+Please review the above and let us know if any adjustments are required.
+
+If no feedback is received within 24 hours, the meeting minutes will be considered approved.
+
 For each discussion topic:
 - Use a short heading.
 - Preserve all useful requirements, decisions, actions, UX notes, edge cases, and clarifications.
@@ -864,6 +891,7 @@ Instructions:
 - You are generating meeting notes from a transcribed meeting.
 - The transcript may contain transcription mistakes, wrong speaker labels, missing punctuation, repeated phrases, or misheard product and feature names. Deduce the intended meaning when something sounds wrong, but do not invent requirements or decisions that are not supported by the transcript.
 - Write the notes in the same format, density, and approximate length as compact professional project manager notes.
+- Write as a senior Product Manager and Business Analyst preparing client-facing, executive-friendly meeting minutes suitable for email distribution.
 - Output only the meeting notes. Do not include an introduction, explanation, Markdown table, action-items section, or summary section unless the meeting itself explicitly had those items.
 - Use plain text with hyphen bullets, not Markdown headings or tables.
 - This is not a transcript recap and not a conversational summary.
@@ -873,6 +901,10 @@ Instructions:
 - Target 800-1,300 words for the final notes. For a very information-dense meeting, you may go up to 1,600 words only if needed to avoid losing information.
 - Keep the notes around the same length and density as the reference format below. Prefer compact, information-rich bullets over long paragraphs.
 - When several small points belong under the same topic, use nested bullets. Merge related wording when no information is lost.
+- Group content under logical business sections such as Project Scope, Requirements & Features, Technical Discussion, Data & Reporting, UX & Design, Operations, Deployment & Go-Live, Security & Integrations, Discovery Phase, and Risks & Dependencies when applicable.
+- Convert requirements into requirement-style statements, not statements about the conversation.
+- For technical topics such as architecture, migration, databases, APIs, integrations, infrastructure, reporting, security, deployment, or go-live, summarize the intended direction, decisions, dependencies, and open questions.
+- When ownership exists, state it clearly using business wording such as "Client will provide API documentation.", "Bit68 will prepare the architecture proposal.", or "Product team will review the BRD and provide feedback."
 - For each topic, present the final decision or final direction only. Do not list multiple opinions, rejected alternatives, interim preferences, or debate history.
 - If a topic has no final decision, state the unresolved point instead of presenting competing views.
 - Use polished professional PM wording: concise, formal, decisive, and implementation-ready.

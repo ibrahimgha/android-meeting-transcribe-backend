@@ -1210,6 +1210,11 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("present one final decision or final direction", prompt)
         self.assertIn("Do not list multiple opinions", prompt)
         self.assertIn("polished professional PM wording", prompt)
+        self.assertIn("client-facing, executive-friendly", prompt)
+        self.assertIn("Project Scope, Requirements & Features, Technical Discussion", prompt)
+        self.assertIn("Client will provide API documentation", prompt)
+        self.assertIn("Please review the above", prompt)
+        self.assertIn("considered approved", prompt)
 
     def test_project_manager_notes_use_chunked_extraction_helpers(self):
         meeting = self.make_meeting(title="Long PM meeting")
@@ -1229,6 +1234,10 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Do not place risks or open points under individual discussion topics", final_prompt)
         self.assertIn("Do not list multiple opinions", final_prompt)
         self.assertIn("polished professional PM wording", final_prompt)
+        self.assertIn("senior Product Manager and Business Analyst", final_prompt)
+        self.assertIn("Technical Discussion", final_prompt)
+        self.assertIn("Bit68 will prepare the architecture proposal", final_prompt)
+        self.assertIn("Closing:", final_prompt)
 
     def test_compact_pm_notes_prompt_uses_compact_grouped_company_guidance(self):
         meeting = self.make_meeting(title="Product planning")
@@ -1242,7 +1251,7 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Compact PM Notes", prompt)
         self.assertIn("Generate refined PM conclusions", prompt)
         self.assertIn("Be summarized like Requirements Gathering output", prompt)
-        self.assertIn("Group all related requirements under the same topic", prompt)
+        self.assertIn("Group all related requirements under logical business sections", prompt)
         self.assertIn("every bullet must be outcome-focused", prompt)
         self.assertIn("Omit transcript process details", prompt)
         self.assertIn("Do not write person_1", prompt)
@@ -1251,6 +1260,9 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Do not write \"said\", \"mentioned\", \"discussed\"", prompt)
         self.assertIn("present one final decision or final direction", prompt)
         self.assertIn("polished professional PM wording", prompt)
+        self.assertIn("client-facing, executive-friendly", prompt)
+        self.assertIn("Product team will review the BRD", prompt)
+        self.assertIn("If no feedback is received within 24 hours", prompt)
         self.assertIn("Risks:", prompt)
         self.assertIn("Open Points:", prompt)
 
@@ -1277,8 +1289,10 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Hard maximum: 850 words", compact_prompt)
         self.assertIn("Remove transcript-recapping language", compact_prompt)
         self.assertIn("Move all risks to the final Risks section", compact_prompt)
-        self.assertIn("Group all related requirements under the same topic", compact_prompt)
+        self.assertIn("Group all related requirements under logical business sections", compact_prompt)
         self.assertIn("Do not list competing opinions", compact_prompt)
+        self.assertIn("suitable for email distribution", compact_prompt)
+        self.assertIn("Meeting Details, Attendees, Discussion Points, Risks, Open Points, Closing", compact_prompt)
 
     def test_project_manager_notes_is_first_web_dropdown_option(self):
         form = MeetingMinutesForm()

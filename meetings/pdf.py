@@ -188,11 +188,11 @@ def build_story(meeting: Meeting, styles: dict[str, ParagraphStyle], *, minutes_
             if details:
                 story.append(build_details_table(details, styles))
             continue
-        if stripped == "Discussion Points:":
-            story.append(Paragraph("Discussion Points", styles["section"]))
-            continue
         if stripped == "Attendees:":
             story.append(Paragraph("Attendees", styles["section"]))
+            continue
+        if stripped in {"Discussion Points:", "Risks:", "Open Points:", "Closing:"}:
+            story.append(Paragraph(stripped.removesuffix(":"), styles["section"]))
             continue
         if is_detail_line(stripped):
             continue
