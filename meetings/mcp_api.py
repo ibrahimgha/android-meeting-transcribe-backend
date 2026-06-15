@@ -16,7 +16,16 @@ from django.utils import timezone
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
 from .import_processing import process_next_pending_import
 from .minutes import PM_NOTES_TYPES, generate_minutes_for_meeting, queue_minutes_for_meeting, sync_meeting_minutes_fields
-from .models import AudioSegment, Meeting, MeetingImport, MeetingMinutesOutput, MeetingMinutesStatus, MeetingStatus, MeetingType
+from .models import (
+    AudioSegment,
+    Meeting,
+    MeetingImport,
+    MeetingMinutesOutput,
+    MeetingMinutesStatus,
+    MeetingStatus,
+    MeetingType,
+    export_meeting_type_choices,
+)
 from .pdf import build_pm_notes_pdf
 from .postprocessing import process_meeting_outputs
 from .transcription import process_next_pending_segment
@@ -59,8 +68,7 @@ def list_meeting_types() -> dict:
                 "label": label,
                 "supports_pdf": value in PM_NOTES_TYPES,
             }
-            for value, label in MeetingType.choices
-            if value != MeetingType.COMPACT_PM_NOTES
+            for value, label in export_meeting_type_choices()
         ]
     }
 

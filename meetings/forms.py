@@ -4,16 +4,12 @@ from django.conf import settings
 from django import forms
 
 from .import_formats import SUPPORTED_IMPORT_AUDIO_EXTENSIONS, supported_import_audio_message
-from .models import Meeting, MeetingType
+from .models import Meeting, MeetingType, export_meeting_type_choices
 
 
 class MeetingMinutesForm(forms.ModelForm):
     meeting_type = forms.ChoiceField(
-        choices=[
-            choice
-            for choice in MeetingType.choices
-            if choice[0] != MeetingType.COMPACT_PM_NOTES
-        ],
+        choices=export_meeting_type_choices(),
         label="Meeting type",
         widget=forms.Select(attrs={"class": "meeting-type-select"}),
     )
@@ -21,6 +17,11 @@ class MeetingMinutesForm(forms.ModelForm):
     class Meta:
         model = Meeting
         fields = ["meeting_type"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.initial.get("meeting_type") and not getattr(self.instance, "meeting_type", ""):
+            self.initial["meeting_type"] = MeetingType.PROJECT_MANAGER_NOTES
 
 
 class MeetingImportForm(forms.Form):

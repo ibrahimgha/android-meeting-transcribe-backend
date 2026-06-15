@@ -40,6 +40,21 @@ class MeetingType(models.TextChoices):
     COMPACT_PM_NOTES = "compact_pm_notes", "Compact PM notes"
 
 
+EXPORT_MEETING_TYPE_ORDER = (
+    MeetingType.PROJECT_MANAGER_NOTES,
+    MeetingType.REQUIREMENT_GATHERING,
+    MeetingType.REQUIREMENT_GATHERING_MINUTES,
+    MeetingType.FOLLOWUP_MEETING,
+    MeetingType.DRAFT_DELIVERY,
+    MeetingType.MEETING_HEALTH_REPORT,
+)
+
+
+def export_meeting_type_choices() -> list[tuple[str, str]]:
+    labels = dict(MeetingType.choices)
+    return [(value, labels[value]) for value in EXPORT_MEETING_TYPE_ORDER]
+
+
 class MeetingOutputStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     PROCESSING = "processing", "Processing"

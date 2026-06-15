@@ -482,6 +482,7 @@ Rules:
 - Preserve product names, screen names, role names, labels, and button names as closely as possible.
 - Do not drop details because they seem minor, repeated, already implied, or similar to another point.
 - If a point is later contradicted or removed inside this same chunk, keep only the later/final direction.
+- Do not preserve competing opinions as separate final notes. Capture the final decision when clear; otherwise mark the item as unresolved or open.
 - Use plain topic headings and bullets.
 - If the chunk has no usable meeting-note details, write "No concrete notes in this chunk."
 
@@ -511,11 +512,14 @@ Critical rules:
 - Target 800-1,300 words for the final notes. For a very information-dense meeting, you may go up to 1,600 words only if needed to avoid losing information.
 - Keep the notes around the same length and density as the reference format below. Prefer compact, information-rich bullets over long paragraphs.
 - Merge related wording into one bullet when no information is lost.
+- For each topic, present one final decision or final direction. Do not list multiple opinions, rejected alternatives, interim preferences, or debate history.
+- If a topic has no final decision, place it under Open Points and state what remains unresolved.
 - Omit unclear transcript fragments unless they resolve to a concrete implementation note, decision, risk, or open point.
 - Remove true duplicates only when the same point is repeated with no new detail.
 - If something is discussed and later removed, omit it completely.
 - If two points contradict each other, keep the later one and omit the earlier one.
-- Use implementation-ready wording, not "the team discussed" phrasing.
+- Use polished professional PM wording: concise, formal, decisive, and implementation-ready.
+- Do not use "the team discussed", "there were different opinions", "some preferred", or similar debate-recapping phrasing.
 - Output only the final meeting notes.
 - Use plain text with hyphen bullets, not Markdown headings or tables.
 
@@ -587,6 +591,8 @@ Rules:
 - Do not omit any unique requirement, decision, constraint, edge case, filter, field, role permission, screen/flow change, button, validation rule, risk, or UX/design note.
 - It is allowed and expected to omit who said what, filler, repeated wording, examples that add no new requirement, transcript uncertainty, and unclear fragments that do not resolve to concrete implementation notes.
 - Merge sibling bullets aggressively when they describe the same product area and no information is lost.
+- For each topic, keep the final decision or final direction only. Move unresolved items to the appropriate open-points wording instead of listing competing opinions.
+- Use polished professional PM wording: concise, formal, decisive, and implementation-ready.
 - Prefer compact grouped bullets and nested bullets over long paragraphs.
 - Keep date and time as:
   - Date: {meeting_date}
@@ -623,6 +629,7 @@ Rules:
 - Do not invent a company name. If attribution is not needed, omit attribution entirely.
 - Include uncertain or mistranscribed terms when the intended meaning is reasonably clear, and mark unclear wording as unclear.
 - If a point is contradicted or removed later inside this same chunk, keep only the later/final direction.
+- Do not preserve competing opinions as separate notes. Capture the final decision when clear; if not clear, mark it as an open point.
 - Prefer normalized bullets such as "Add...", "Remove...", "The system should...", "Decision:", "Action:", "Risk:", or "Open point:".
 - Keep risks and open points identifiable so the final pass can gather them into the final Risks and Open Points sections.
 - Do not write bullets like "Person X said...", "The client discussed...", "They talked about...", or "It was mentioned that..." unless the speaker identity itself creates an action or responsibility.
@@ -655,6 +662,8 @@ Critical rules:
 - Target 300-650 words. For an unusually dense meeting, you may go up to 850 words only if needed to preserve important conclusions.
 - Do not scatter related requirements. Group all related items under the same topic heading, even if they came from different transcript chunks.
 - Merge repeated or closely related bullets into one refined bullet whenever they lead to the same conclusion.
+- For each topic, present one final decision or final direction. Do not list multiple opinions, rejected alternatives, interim preferences, or debate history.
+- If a topic has no final decision, move it to Open Points and state what remains unresolved.
 - Omit who said what, filler, repeated wording, examples that add no new requirement, conversational phrasing, and discussion history.
 - Preserve useful final information: requirements, decisions, constraints, edge cases, filters, fields, role permissions, screen or flow changes, buttons, validation rules, risks, UX notes, actions, and open points.
 - Under Discussion Points, every bullet must be one of these useful outputs: a requirement, decision, action item, constraint, or UX/delivery note.
@@ -666,7 +675,8 @@ Critical rules:
 - Do not invent attendees or company names. If attendees are unclear, write "Not specified".
 - If something is discussed and later removed, omit it completely.
 - If two points contradict each other, keep the later one and omit the earlier one.
-- Use implementation-ready wording.
+- Use polished professional PM wording: concise, formal, decisive, and implementation-ready.
+- Do not use "there were different opinions", "some preferred", "the team debated", or similar debate-recapping phrasing.
 - Use plain text with hyphen bullets, not Markdown tables.
 - Do not write "said", "mentioned", "discussed", "talked about", "asked about", "explained", or similar transcript-recapping language unless it is required to assign an owner or action.
 
@@ -743,6 +753,9 @@ Rules:
 - Merge sibling bullets aggressively when no information is lost.
 - Remove transcript-recapping language. The result should read like refined PM conclusions, not like what people said during the meeting.
 - Every bullet must be actionable or decision-oriented. Drop bullets that only describe conversation history.
+- For each topic, keep the final decision or final direction only. Do not list competing opinions, rejected alternatives, interim preferences, or debate history.
+- If a topic has no final decision, move it to Open Points and state what remains unresolved.
+- Use polished professional PM wording: concise, formal, decisive, and implementation-ready.
 - Move all risks to the final Risks section.
 - Move all open questions, unresolved decisions, dependencies, pending confirmations, and follow-ups to the final Open Points section.
 - Do not leave risks or open points under individual discussion topics.
@@ -783,6 +796,8 @@ Instructions:
 - Target 300-650 words. For a dense meeting, go up to 850 words only if needed.
 - Group all related requirements under the same topic. Do not scatter related items across multiple headings.
 - Merge related bullets when they lead to the same conclusion or action.
+- For each topic, present one final decision or final direction. Do not list multiple opinions, rejected alternatives, interim preferences, or debate history.
+- If a topic has no final decision, move it to Open Points and state what remains unresolved.
 - Under Discussion Points, every bullet must be outcome-focused: a requirement, decision, action item, constraint, UX note, or delivery note.
 - Do not place risks or open points under individual discussion topics.
 - Gather all risks into the final Risks section.
@@ -794,7 +809,8 @@ Instructions:
 - Do not invent attendees or company names.
 - If something is discussed and later removed, omit it completely.
 - If two points contradict each other, keep the later one and omit the earlier one.
-- Use implementation-ready wording.
+- Use polished professional PM wording: concise, formal, decisive, and implementation-ready.
+- Do not use "there were different opinions", "some preferred", "the team debated", or similar debate-recapping phrasing.
 - Use plain text with hyphen bullets, not Markdown tables.
 - Do not write "said", "mentioned", "discussed", "talked about", "asked about", "explained", or similar recap language unless it is required to assign ownership or an action.
 
@@ -857,6 +873,9 @@ Instructions:
 - Target 800-1,300 words for the final notes. For a very information-dense meeting, you may go up to 1,600 words only if needed to avoid losing information.
 - Keep the notes around the same length and density as the reference format below. Prefer compact, information-rich bullets over long paragraphs.
 - When several small points belong under the same topic, use nested bullets. Merge related wording when no information is lost.
+- For each topic, present the final decision or final direction only. Do not list multiple opinions, rejected alternatives, interim preferences, or debate history.
+- If a topic has no final decision, state the unresolved point instead of presenting competing views.
+- Use polished professional PM wording: concise, formal, decisive, and implementation-ready.
 - Omit unclear transcript fragments unless they resolve to a concrete implementation note, decision, risk, or open point.
 - Before finalizing, review the transcript again and add any concrete detail that was not already captured.
 

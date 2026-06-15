@@ -605,6 +605,10 @@ class MeetingMcpApiTests(TestCase):
         type_payload = mcp_api.list_meeting_types()
 
         self.assertEqual(user_payload["username"], "mcp-user")
+        self.assertEqual(
+            type_payload["meeting_types"][0]["value"],
+            MeetingType.PROJECT_MANAGER_NOTES,
+        )
         self.assertIn(
             {
                 "value": MeetingType.PROJECT_MANAGER_NOTES,
@@ -1203,6 +1207,9 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Gather all open questions", prompt)
         self.assertIn("Target 300-650 words", prompt)
         self.assertIn("If something is discussed and later removed, omit it completely", prompt)
+        self.assertIn("present one final decision or final direction", prompt)
+        self.assertIn("Do not list multiple opinions", prompt)
+        self.assertIn("polished professional PM wording", prompt)
 
     def test_project_manager_notes_use_chunked_extraction_helpers(self):
         meeting = self.make_meeting(title="Long PM meeting")
@@ -1220,6 +1227,8 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Risks:", final_prompt)
         self.assertIn("Open Points:", final_prompt)
         self.assertIn("Do not place risks or open points under individual discussion topics", final_prompt)
+        self.assertIn("Do not list multiple opinions", final_prompt)
+        self.assertIn("polished professional PM wording", final_prompt)
 
     def test_compact_pm_notes_prompt_uses_compact_grouped_company_guidance(self):
         meeting = self.make_meeting(title="Product planning")
@@ -1240,6 +1249,8 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Use actual company", prompt)
         self.assertIn("Target 300-650 words", prompt)
         self.assertIn("Do not write \"said\", \"mentioned\", \"discussed\"", prompt)
+        self.assertIn("present one final decision or final direction", prompt)
+        self.assertIn("polished professional PM wording", prompt)
         self.assertIn("Risks:", prompt)
         self.assertIn("Open Points:", prompt)
 
@@ -1267,11 +1278,14 @@ class MeetingMinutesTests(TestCase):
         self.assertIn("Remove transcript-recapping language", compact_prompt)
         self.assertIn("Move all risks to the final Risks section", compact_prompt)
         self.assertIn("Group all related requirements under the same topic", compact_prompt)
+        self.assertIn("Do not list competing opinions", compact_prompt)
 
-    def test_compact_pm_notes_is_hidden_from_web_dropdown(self):
+    def test_project_manager_notes_is_first_web_dropdown_option(self):
         form = MeetingMinutesForm()
         choice_values = [value for value, _ in form.fields["meeting_type"].choices]
 
+        self.assertEqual(choice_values[0], MeetingType.PROJECT_MANAGER_NOTES)
+        self.assertEqual(form.initial["meeting_type"], MeetingType.PROJECT_MANAGER_NOTES)
         self.assertIn(MeetingType.PROJECT_MANAGER_NOTES, choice_values)
         self.assertIn(MeetingType.MEETING_HEALTH_REPORT, choice_values)
         self.assertNotIn(MeetingType.COMPACT_PM_NOTES, choice_values)

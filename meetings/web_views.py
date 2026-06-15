@@ -97,6 +97,8 @@ class MeetingDetailView(LoginRequiredMixin, DetailView):
             if selected_output is not None
             else self.object.meeting_type
         )
+        if not selected_type:
+            selected_type = MeetingType.PROJECT_MANAGER_NOTES
         context["minutes_form"] = MeetingMinutesForm(
             instance=self.object,
             initial={"meeting_type": selected_type},
